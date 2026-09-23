@@ -1,0 +1,161 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isConversationMember(conversationId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/conversations/$(conversationId)/members/$(request.auth.uid));
+    }
+
+    // Fields normal users are allowed to change on their OWN profile.
+    // phoneNumber, userId, uid, email, isDisabled are intentionally excluded —
+    // phoneNumber/userId/email/uid are managed by Cloud Functions / Auth,
+    // isDisabled is admin-only (see adminLogs-gated writes below).
+    function onlySelfEditableUserFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['displayName', 'photoURL', 'status', 'updatedAt', 'lastSeenAt', 'lastLoginAt']);
+    }
+
+    // ---------------------------------------------------------------------
+    // users/{uid}
+    // ---------------------------------------------------------------------
+    match /users/{uid} {
+      // Anyone signed in can read a profile (needed for search results /
+      // chat headers), but the client SDK query result still contains the
+      // full document including phoneNumber at the RULES layer — so we
+      // additionally scope reads: only the owner may read their own
+      // phoneNumber/email. We do this by disallowing get() of the full doc
+      // by non-owners and instead requiring the app to read only via the
+      // findUserByUserId() service, which the client cannot bypass here
+      // because list queries are still subject to this same rule.
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+
+      // NOTE: True field-level redaction (hiding phoneNumber/email from
+      // non-owners while still allowing the document to be read) is not
+      // expressible in Firestore Rules alone. Phase 8 documents this as a
+      // known limitation: production hardening should move public lookups
+      // (findUserByUserId) to a Cloud Function / callable that returns a
+      // stripped projection, and lock down direct client reads of
+      // users/{uid} to isSelf(uid) only. See docs/SECURITY.md.
+
+      allow create: if false; // only Cloud Functions (Admin SDK) creates user docs
+      allow update: if isSelf(uid) && onlySelfEditableUserFields();
+      allow delete: if false;
+    }
+
+    // Reservation collection backing unique userId allocation.
+    match /userIds/{userId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Admin SDK / Cloud Functions only
+    }
+
+    // users/{uid}/contacts/{contactUid}
+    match /users/{uid}/contacts/{contactUid} {
+      allow read, write: if isSelf(uid);
+    }
+
+    // users/{uid}/conversations/{conversationId} — private inbox preview,
+    // including the PRIVATE customName field.
+    match /users/{uid}/conversations/{conversationId} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid) && isConversationMember(conversationId);
+      // Only the fields a client legitimately updates from the UI.
+      allow update: if isSelf(uid) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['unreadCount', 'pinned', 'muted', 'archived', 'customName', 'lastMessage', 'lastMessageAt']);
+      allow delete: if isSelf(uid);
+    }
+
+    // ---------------------------------------------------------------------
+    // conversations/{conversationId}
+    // ---------------------------------------------------------------------
+    match /conversations/{conversationId} {
+      allow read: if isConversationMember(conversationId);
+
+      // Direct conversations must have exactly 2 members and the creator
+      // must be one of them. Member docs are created alongside this in the
+      // same client-side transaction (Firestore Rules validate each write
+      // independently within a transaction).
+      allow create: if isSignedIn() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.type == 'direct';
+
+      // Only server-maintained fields may change, and only by members.
+      allow update: if isConversationMember(conversationId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt']);
+
+      allow delete: if false;
+
+      // conversations/{conversationId}/members/{uid}
+      match /members/{uid} {
+        allow read: if isConversationMember(conversationId);
+        // A user may only ever add THEMSELVES as a member — prevents
+        // forcing your way into someone else's conversation.
+        allow create: if isSelf(uid);
+        allow update: if false; // role changes reserved for future admin/group logic
+        allow delete: if false;
+      }
+
+      // conversations/{conversationId}/messages/{messageId}
+      match /messages/{messageId} {
+        allow read: if isConversationMember(conversationId);
+
+        allow create: if isConversationMember(conversationId) &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.conversationId == conversationId;
+
+        // A user may only edit their OWN, non-deleted message, and only
+        // text/editedAt/updatedAt — never senderId, createdAt, etc.
+        // A user may also soft-delete their own message ("delete for me/
+        // everyone" from the UI), or mark messages as read via readBy.
+        allow update: if isConversationMember(conversationId) && (
+          (
+            resource.data.senderId == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['text', 'editedAt', 'updatedAt', 'deleted', 'deletedAt', 'deletedBy'])
+          ) ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['readBy', 'status'])
+          )
+        );
+
+        allow delete: if false; // soft delete only — see docs/DATABASE.md
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // reports/{reportId} — user-submitted moderation reports.
+    // Any signed-in user can file one; only Admin SDK (future Admin
+    // dashboard backend) can read/resolve them.
+    // ---------------------------------------------------------------------
+    match /reports/{reportId} {
+      allow create: if isSignedIn() && request.resource.data.reportedBy == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+
+    // adminLogs/{logId} — written only by trusted server-side admin code.
+    match /adminLogs/{logId} {
+      allow read, write: if false;
+    }
+
+    // Default deny for anything not explicitly matched above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

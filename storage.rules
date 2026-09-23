@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isConversationMember(conversationId) {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/conversations/$(conversationId)/members/$(request.auth.uid));
+    }
+
+    // users/{uid}/avatar.jpg — public read (profile photos are shown to
+    // other users), owner-only write, with basic type/size validation.
+    match /users/{uid}/avatar.{ext} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+
+    // conversations/{conversationId}/media/{fileName} — chat media
+    // (images, voice notes, files). Only conversation members may read or
+    // upload, and uploads are capped at 25MB.
+    match /conversations/{conversationId}/media/{fileName} {
+      allow read: if isConversationMember(conversationId);
+      allow write: if isConversationMember(conversationId) &&
+        request.resource.size < 25 * 1024 * 1024;
+    }
+
+    // Deny everything else by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
