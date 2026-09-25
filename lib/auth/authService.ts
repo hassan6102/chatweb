@@ -8,18 +8,30 @@ import {
   EmailAuthProvider,
   type User,
 } from "firebase/auth";
-import { auth } from "@/firebase/client";
+import { auth, db } from "@/firebase/client"; 
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
-/**
- * Registers a new user in Firebase Authentication only. Firebase Auth
- * hashes and stores the password itself — this app never sees or stores
- * a plaintext password anywhere. The matching users/{uid} Firestore
- * document (with the public userId) is created server-side right after
- * this succeeds — see lib/users/createUserProfile.server.ts and
- * docs/ARCHITECTURE.md ("Authentication flow").
- */
-export async function registerWithEmail(email: string, password: string): Promise<User> {
+export async function registerWithEmail(email: string, password: string, phoneNumber: string = ""): Promise<User> {
+  // 1. إنشاء الحساب في المصادقة
   const credential = await createUserWithEmailAndPassword(auth, email, password);
+  const uid = credential.user.uid;
+
+  // 2. توليد معرف مستخدم فريد عشوائياً (مثال: USER-45912)
+  const generatedUserId = "USER-" + Math.floor(10000 + Math.random() * 90000);
+  
+  // 3. حفظ كافة البيانات الأساسية في قاعدة البيانات مباشرة
+  await setDoc(doc(db, "users", uid), {
+    uid: uid,
+    userId: generatedUserId,
+    email: email,
+    phoneNumber: phoneNumber,
+    createdAt: serverTimestamp(),
+    accountStatus: "active",
+    isOnline: true,
+    conversationCount: 0,
+    messageCount: 0
+  });
+
   return credential.user;
 }
 
@@ -36,7 +48,6 @@ export async function requestPasswordReset(email: string): Promise<void> {
   await sendPasswordResetEmail(auth, email);
 }
 
-/** Requires recent login; re-authenticates first so Firebase doesn't reject a stale session. */
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   const user = auth.currentUser;
   if (!user || !user.email) {
@@ -47,7 +58,6 @@ export async function changePassword(currentPassword: string, newPassword: strin
   await updatePassword(user, newPassword);
 }
 
-/** Maps Firebase Auth error codes to friendly, non-leaky messages. */
 export function describeAuthError(error: unknown): string {
   const code = (error as { code?: string })?.code ?? "";
   switch (code) {

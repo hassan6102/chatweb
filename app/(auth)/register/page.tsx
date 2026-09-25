@@ -1,26 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { registerWithEmail, describeAuthError } from "@/lib/auth/authService";
+import { TextField } from "@/components/common/TextField";
+import { Button } from "@/components/common/Button";
 
-/** Minimal testing UI for the auth foundation — not the final design. */
 export default function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState(""); // الحقل الجديد لرقم الموبايل
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  const confirmError = useMemo(
+    () => (confirm && confirm !== password ? "Passwords don't match." : undefined),
+    [confirm, password]
+  );
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (password !== confirm) return;
     setSubmitting(true);
     try {
-      const user = await registerWithEmail(email, password);
-      // Server-side profile creation (unique userId, no plaintext secrets)
-      // happens via a Cloud Functions onCreate trigger — see functions/src/onUserCreate.ts.
-      void user;
+      // تمرير رقم الموبايل كمتغير ثالث لدالة التسجيل
+      await registerWithEmail(email, password, phoneNumber);
       router.push("/");
     } catch (err) {
       setError(describeAuthError(err));
@@ -30,35 +38,66 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="mx-auto max-w-sm p-8">
-      <h1 className="text-xl font-semibold">Create account</h1>
-      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
-        <input
+    <>
+      <h1 className="text-xl font-semibold text-ink">Create your account</h1>
+      <p className="mt-1 text-sm text-ink-muted">You&apos;ll get a unique User ID to share with people you chat with.</p>
+
+      <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-4">
+        <TextField
+          label="Email"
           type="email"
           required
-          placeholder="Email"
+          autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="rounded border px-3 py-2"
         />
-        <input
+        
+        {/* حقل إدخال رقم الموبايل (إجباري) */}
+        <TextField
+          label="Phone Number"
+          type="tel"
+          required
+          autoComplete="tel"
+          value={phoneNumber}
+          onChange={(e) => setPhoneNumber(e.target.value)}
+        />
+
+        <TextField
+          label="Password"
           type="password"
           required
           minLength={6}
-          placeholder="Password (min 6 characters)"
+          autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="rounded border px-3 py-2"
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-black px-3 py-2 text-white disabled:opacity-50"
-        >
-          {submitting ? "Creating account..." : "Register"}
-        </button>
+        <TextField
+          label="Confirm password"
+          type="password"
+          required
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          error={confirmError}
+        />
+
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
+
+        <Button type="submit" disabled={submitting || !!confirmError} fullWidth>
+          {submitting ? "Creating account…" : "Create account"}
+        </Button>
       </form>
-    </main>
+
+      <p className="mt-6 text-center text-sm text-ink-muted">
+        Already have an account?{" "}
+        <Link href="/login" className="focus-ring font-medium text-accent hover:underline">
+          Log in
+        </Link>
+      </p>
+    </>
   );
 }

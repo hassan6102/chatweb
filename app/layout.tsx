@@ -1,15 +1,35 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+// The stylesheet is processed by Next.js; TypeScript may not have a declaration for it.
+// @ts-expect-error CSS side-effect imports are handled by the Next.js bundler.
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Messaging App",
-  description: "Backend foundation phase — no final UI yet.",
+  description: "A fast, modern 1-to-1 messaging app — find people by User ID and chat privately.",
 };
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
+const THEME_INIT_SCRIPT = `
+try {
+  var stored = JSON.parse(localStorage.getItem("theme-preference") || '"system"');
+  if (stored === "light" || stored === "dark") {
+    document.documentElement.setAttribute("data-theme", stored);
+  }
+} catch (e) {}
+`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
+      <body className="font-sans antialiased">{children}</body>
     </html>
   );
 }

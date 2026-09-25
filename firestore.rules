@@ -28,28 +28,12 @@ service cloud.firestore {
         .hasOnly(['displayName', 'photoURL', 'status', 'updatedAt', 'lastSeenAt', 'lastLoginAt']);
     }
 
-    // ---------------------------------------------------------------------
+   // ---------------------------------------------------------------------
     // users/{uid}
     // ---------------------------------------------------------------------
     match /users/{uid} {
-      // Anyone signed in can read a profile (needed for search results /
-      // chat headers), but the client SDK query result still contains the
-      // full document including phoneNumber at the RULES layer — so we
-      // additionally scope reads: only the owner may read their own
-      // phoneNumber/email. We do this by disallowing get() of the full doc
-      // by non-owners and instead requiring the app to read only via the
-      // findUserByUserId() service, which the client cannot bypass here
-      // because list queries are still subject to this same rule.
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-
-      // NOTE: True field-level redaction (hiding phoneNumber/email from
-      // non-owners while still allowing the document to be read) is not
-      // expressible in Firestore Rules alone. Phase 8 documents this as a
-      // known limitation: production hardening should move public lookups
-      // (findUserByUserId) to a Cloud Function / callable that returns a
-      // stripped projection, and lock down direct client reads of
-      // users/{uid} to isSelf(uid) only. See docs/SECURITY.md.
+      // إغلاق الثغرة الأمنية: لا يمكن قراءة المستند كاملاً إلا لصاحب الحساب أو للمشرف
+      allow read: if isSelf(uid) || (request.auth != null && request.auth.token.admin == true);
 
       allow create: if false; // only Cloud Functions (Admin SDK) creates user docs
       allow update: if isSelf(uid) && onlySelfEditableUserFields();

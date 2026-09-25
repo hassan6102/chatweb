@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { loginWithEmail, describeAuthError } from "@/lib/auth/authService";
+import { TextField } from "@/components/common/TextField";
+import { Button } from "@/components/common/Button";
 
-/** Minimal testing UI for the auth foundation — not the final design. */
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -12,7 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
@@ -27,34 +29,50 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="mx-auto max-w-sm p-8">
-      <h1 className="text-xl font-semibold">Log in</h1>
-      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
-        <input
+    <>
+      <h1 className="text-xl font-semibold text-ink">Welcome back</h1>
+      <p className="mt-1 text-sm text-ink-muted">Log in to keep chatting.</p>
+
+      <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-4">
+        <TextField
+          label="Email"
           type="email"
           required
-          placeholder="Email"
+          autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="rounded border px-3 py-2"
         />
-        <input
-          type="password"
-          required
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="rounded border px-3 py-2"
-        />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-black px-3 py-2 text-white disabled:opacity-50"
-        >
-          {submitting ? "Signing in..." : "Log in"}
-        </button>
+        <div>
+          <TextField
+            label="Password"
+            type="password"
+            required
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <Link href="/forgot-password" className="focus-ring mt-1.5 inline-block text-xs text-accent hover:underline">
+            Forgot password?
+          </Link>
+        </div>
+
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
+
+        <Button type="submit" disabled={submitting} fullWidth>
+          {submitting ? "Signing in…" : "Log in"}
+        </Button>
       </form>
-    </main>
+
+      <p className="mt-6 text-center text-sm text-ink-muted">
+        New here?{" "}
+        <Link href="/register" className="focus-ring font-medium text-accent hover:underline">
+          Create an account
+        </Link>
+      </p>
+    </>
   );
 }
