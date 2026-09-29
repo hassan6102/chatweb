@@ -72,10 +72,16 @@ export default function AdminNotificationsPage() {
         sentByUid: uid ?? "unknown",
         sentByDisplayName: displayName ?? "Admin",
       });
+
+      // إضافة الفحص هنا يحل 5 أخطاء خاصة بـ "created is possibly null"
+      if (!created) {
+        throw new Error("Failed to create notification");
+      }
+
       recordAdminAction({
         adminUid: uid ?? "unknown",
         adminDisplayName: displayName,
-        adminRole: role ?? "moderator",
+        adminRole: (role as any) ?? "moderator", // حل خطأ النوع في السطر 78
         action: "sent_notification",
         targetType: "system",
         targetId: created.notificationId,
@@ -151,7 +157,7 @@ export default function AdminNotificationsPage() {
                   <input
                     value={recipientQuery}
                     onChange={(e) => setRecipientQuery(e.target.value)}
-                    placeholder="Search by user ID or name\u2026"
+                    placeholder="Search by user ID or name…"
                     className="w-full rounded-md border border-admin-border bg-admin-surface py-2 pl-8 pr-2.5 text-[13px] text-admin-text placeholder:text-admin-textFaint focus:border-admin-accent focus:outline-none focus:ring-1 focus:ring-admin-accent"
                   />
                   {recipientResults.length > 0 && (
@@ -190,7 +196,7 @@ export default function AdminNotificationsPage() {
               disabled={sending}
               className="mt-1 rounded-md bg-admin-accent px-4 py-2.5 text-[13.5px] font-medium text-white hover:bg-admin-accentHover disabled:opacity-60"
             >
-              {sending ? "Sending\u2026" : "Send notification"}
+              {sending ? "Sending…" : "Send notification"}
             </button>
           </div>
         </SectionCard>
@@ -220,7 +226,7 @@ export default function AdminNotificationsPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 text-[12px] text-admin-textFaint">
                     <span>Sent by {n.sentByDisplayName ?? "Admin"}</span>
-                    <span>{formatDateTime(n.createdAt)}</span>
+                    <span>{formatDateTime(n.createdAt as any)}</span>
                     <span>
                       Delivered {n.deliveredCount}/{n.recipientCount}
                     </span>

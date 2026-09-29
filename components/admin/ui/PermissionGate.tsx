@@ -11,6 +11,6 @@ import { hasPermission, type AdminPermission } from "@/types/admin";
  */
 export function PermissionGate({ permission, fallback = null, children }: { permission: AdminPermission; fallback?: ReactNode; children: ReactNode }) {
   const { role } = useAdminAuth();
-  if (!hasPermission(role, permission)) return <>{fallback}</>;
+if (!hasPermission(role as any, permission)) return <>{fallback}</>;
   return <>{children}</>;
 }

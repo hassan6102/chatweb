@@ -35,7 +35,7 @@ export async function createOrGetDirectConversation(
     query(collection(db, "conversations"), where("directKey", "==", directKey), limit(1))
   );
   if (!existing.empty) {
-    return existing.docs[0].id;
+    return existing.docs[0]!.id;
   }
 
   const conversationRef = doc(collection(db, "conversations"));

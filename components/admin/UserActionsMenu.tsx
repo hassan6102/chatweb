@@ -6,7 +6,7 @@ import { RowMenu, type RowMenuItem } from "@/components/admin/ui/RowMenu";
 import { ConfirmDialog } from "@/components/admin/ui/ConfirmDialog";
 import { useAdminToast } from "@/components/admin/ui/Toast";
 import { useAdminAuth } from "@/lib/admin/adminAuth";
-import { hasPermission, type AdminUserRow } from "@/types/admin";
+import { hasPermission, type AdminRole, type AdminUserRow } from "@/types/admin";
 import { recordAdminAction } from "@/lib/admin/auditLog";
 import { forceLogout, sendPasswordReset, setUserAccountStatus } from "@/lib/admin/api";
 import { EyeIcon, LockIcon, LogoutIcon, ShieldIcon, TrashIcon } from "@/components/admin/icons";
@@ -32,13 +32,14 @@ export function UserActionsMenu({
   const [pending, setPending] = useState<PendingAction>(null);
   const [working, setWorking] = useState(false);
 
-  const canManage = hasPermission(role, "users:manage");
-
+  const canManage = hasPermission(role as any, "users:manage");
   function logAction(action: Parameters<typeof recordAdminAction>[0]["action"]) {
+    const adminRole: AdminRole = (role as AdminRole | undefined) ?? "moderator";
+
     recordAdminAction({
       adminUid: adminUid ?? "unknown",
       adminDisplayName: adminDisplayName,
-      adminRole: role ?? "moderator",
+      adminRole,
       action,
       targetType: "user",
       targetId: user.uid,

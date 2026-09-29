@@ -17,7 +17,7 @@ export async function findUserByUserId(userId: string): Promise<PublicUserProfil
   if (snap.empty) return null;
 
   const doc = snap.docs[0];
-  const data = doc.data() as UserDocument;
+  const data = doc!.data() as UserDocument;
   if (data.isDisabled) return null;
 
   return toPublicUserProfile(data);

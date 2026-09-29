@@ -42,7 +42,6 @@ export async function getMessagesPage(
 
   return {
     messages: docs.map((d) => d.data() as MessageDocument),
-    cursor: docs.length ? docs[docs.length - 1] : null,
-    hasMore,
+    cursor: docs.length ? (docs[docs.length - 1] ?? null) : null, hasMore,
   };
 }

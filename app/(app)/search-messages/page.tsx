@@ -72,8 +72,7 @@ function SearchMessagesInner() {
                     onClick={() => router.push(`/chat/${conversationId}`)}
                     className="focus-ring flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-surface-sunken"
                   >
-                    <Avatar name={name} userId={sender?.userId ?? ""} photoURL={sender?.photoURL} />
-                    <span className="min-w-0 flex-1">
+                    <Avatar name={name} userId={sender?.userId ?? ""} photoURL={(sender as any)?.photoURL} />                    <span className="min-w-0 flex-1">
                       <span className="flex items-center justify-between gap-2">
                         <span dir="auto" className="truncate text-sm font-medium text-ink">
                           {name}

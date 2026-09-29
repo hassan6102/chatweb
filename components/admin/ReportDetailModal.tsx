@@ -6,7 +6,7 @@ import { CloseIcon } from "@/components/admin/icons";
 import { ReportStatusBadge } from "@/components/admin/ui/Badge";
 import { useAdminToast } from "@/components/admin/ui/Toast";
 import { useAdminAuth } from "@/lib/admin/adminAuth";
-import { hasPermission, type ReportDocument, type ReportStatus } from "@/types/admin";
+import { hasPermission, type AdminRole, type ReportDocument, type ReportStatus } from "@/types/admin";
 import { setReportStatus } from "@/lib/admin/api";
 import { recordAdminAction } from "@/lib/admin/auditLog";
 import { formatDateTime } from "@/lib/admin/format";
@@ -29,9 +29,10 @@ export function ReportDetailModal({
 }) {
   const { notify } = useAdminToast();
   const { role, uid, displayName } = useAdminAuth();
-  const canManage = hasPermission(role, "reports:manage");
+  const canManage = hasPermission(role as any, "reports:manage");
   const [notes, setNotes] = useState(report.resolutionNotes ?? "");
   const [working, setWorking] = useState(false);
+  const safeAdminRole = (role ?? "moderator") as AdminRole;
 
   async function updateStatus(status: ReportStatus) {
     setWorking(true);
@@ -42,7 +43,7 @@ export function ReportDetailModal({
         recordAdminAction({
           adminUid: uid ?? "unknown",
           adminDisplayName: displayName,
-          adminRole: role ?? "moderator",
+          adminRole: safeAdminRole,
           action: "reviewed_report",
           targetType: "report",
           targetId: report.reportId,

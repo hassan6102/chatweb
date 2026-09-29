@@ -55,10 +55,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
   return (
     <AdminToastProvider>
       <div className={`flex min-h-screen bg-admin-canvas ${adminSansStack}`}>
-        <AdminSidebar role={role} mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
-        <div className="flex min-h-screen flex-1 flex-col md:pl-0">
+        <AdminSidebar role={role as any} mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />        <div className="flex min-h-screen flex-1 flex-col md:pl-0">
           <AdminHeader
-            role={role}
+            role={role as any}
             displayName={displayName}
             email={email}
             isDevOverride={isDevOverride}
