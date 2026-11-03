@@ -8,6 +8,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "@/firebase/client";
@@ -76,6 +77,7 @@ export function useMessages(conversationId: string) {
 
         const liveQuery = query(
           collection(db, "conversations", conversationId, "messages"),
+          where("conversationId", "==", conversationId),
           orderBy("createdAt", "desc"),
           limit(PAGE_SIZE)
         );

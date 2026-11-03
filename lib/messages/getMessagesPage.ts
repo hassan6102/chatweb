@@ -1,6 +1,7 @@
 import {
   collection,
   query,
+  where,
   orderBy,
   limit,
   startAfter,
@@ -30,6 +31,7 @@ export async function getMessagesPage(
 ): Promise<MessagesPage> {
   const base = query(
     collection(db, "conversations", conversationId, "messages"),
+    where("conversationId", "==", conversationId),
     orderBy("createdAt", "desc"),
     limit(pageSize + 1)
   );

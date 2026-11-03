@@ -73,7 +73,15 @@ export function UserSearch() {
       router.push(`/chat/${conversationId}`);
     } catch (error) {
       console.error("Error creating conversation:", error);
-      setActionError("Could not start this conversation. Please try again.");
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String(error.code)
+          : null;
+      setActionError(
+        code
+          ? `Could not start this conversation (Firebase: ${code}). Please try again.`
+          : "Could not start this conversation. Please try again."
+      );
     } finally {
       setIsStartingChat(false);
     }

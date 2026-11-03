@@ -80,22 +80,6 @@ export async function createOrGetDirectConversation(
   const directKey = buildDirectKey(currentUid, otherUid);
   const conversationRef = doc(db, "conversations", directKey);
   const conversationId = conversationRef.id;
-  const existingConversation = await getDoc(conversationRef);
-
-  if (existingConversation.exists()) {
-    const data = existingConversation.data();
-    if (
-      data.type !== "direct" ||
-      !Array.isArray(data.memberUids) ||
-      !data.memberUids.includes(currentUid) ||
-      !data.memberUids.includes(otherUid)
-    ) {
-      throw new Error("The existing conversation does not match these users.");
-    }
-
-    await reopenInboxEntry(currentUid, otherUid, conversationId);
-    return conversationId;
-  }
 
   try {
     await runTransaction(db, async (transaction) => {
@@ -137,12 +121,31 @@ export async function createOrGetDirectConversation(
       }
     });
   } catch (error) {
-    const concurrentResult = await findExistingConversation(currentUid, otherUid);
-    if (!concurrentResult.empty) {
-      const concurrentConversationId = concurrentResult.docs[0]!.data().conversationId as string;
-      await reopenInboxEntry(currentUid, otherUid, concurrentConversationId);
-      return concurrentConversationId;
+    try {
+      const concurrentResult = await findExistingConversation(currentUid, otherUid);
+      if (!concurrentResult.empty) {
+        const concurrentConversationId = concurrentResult.docs[0]!.data().conversationId as string;
+        await reopenInboxEntry(currentUid, otherUid, concurrentConversationId);
+        return concurrentConversationId;
+      }
+
+      const existingConversation = await getDoc(conversationRef);
+      if (existingConversation.exists()) {
+        const data = existingConversation.data();
+        if (
+          data.type === "direct" &&
+          Array.isArray(data.memberUids) &&
+          data.memberUids.includes(currentUid) &&
+          data.memberUids.includes(otherUid)
+        ) {
+          await reopenInboxEntry(currentUid, otherUid, conversationId);
+          return conversationId;
+        }
+      }
+    } catch (recoveryError) {
+      console.error("Could not recover an existing direct conversation:", recoveryError);
     }
+
     throw error;
   }
 

@@ -114,7 +114,15 @@ export default function OtherUserProfilePage() {
             router.push(`/chat/${conversationId}`);
           } catch (error) {
             console.error("Could not start conversation:", error);
-            setToast("Could not start this conversation.");
+            const code =
+              typeof error === "object" && error !== null && "code" in error
+                ? String(error.code)
+                : null;
+            setToast(
+              code
+                ? `Could not start this conversation (Firebase: ${code}).`
+                : "Could not start this conversation."
+            );
           }
         }}
         onRename={() => setRenaming(true)}
