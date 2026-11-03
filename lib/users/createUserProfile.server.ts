@@ -32,6 +32,7 @@ export async function createUserProfile(params: {
         }
 
         const userRef = adminDb.collection("users").doc(uid);
+        const publicProfileRef = adminDb.collection("publicProfiles").doc(uid);
         const now = FieldValue.serverTimestamp();
 
         const userData = {
@@ -51,6 +52,7 @@ export async function createUserProfile(params: {
 
         tx.set(userRef, userData);
         tx.set(reservationRef, { uid, createdAt: now });
+        tx.set(publicProfileRef, { uid, userId: candidate, displayName });
 
         return userData;
       });

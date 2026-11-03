@@ -5,8 +5,8 @@
 - Firebase client/admin separation (`firebase/client.ts`, `firebase/admin.ts`)
 - Auth service functions + `useAuth` hook + `ProtectedRoute` + minimal
   testing-only login/register pages
-- User identity system: `GH-#####` public userId, generation +
-  server-side uniqueness allocation, `findUserByUserId`
+- User identity system: `GH-#####` public userId, client-side allocation
+  with Firestore-enforced unique reservations, `findUserByUserId`
 - Firestore data model + TypeScript types for users, conversations,
   members, inbox previews, messages
 - Conversation service: `createOrGetDirectConversation` (dedup via
@@ -34,10 +34,6 @@
   exists (`initAppCheck`) but is not yet called from a provider
 
 ## Known gaps to close before production (see docs/SECURITY.md)
-- **`users/{uid}` field-level privacy**: current rules allow any signed-in
-  user to read the full document, including `phoneNumber`. Must be
-  hardened via a callable Cloud Function projection or a split
-  `users/{uid}/private/profile` doc before real phone numbers are stored.
 - No rate limiting / abuse prevention on message sends or report filing.
 - `onlySelfEditableUserFields()` / message-update rules should get
   automated Rules unit tests (e.g. `@firebase/rules-unit-testing`) — none

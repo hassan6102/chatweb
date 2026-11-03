@@ -11,13 +11,13 @@ export type UserStatus = "active" | "away" | "offline";
  */
 export interface UserDocument {
   uid: string;
-  /** Public, searchable, stable identifier. Format: USER-##### */
+  /** Public, searchable, stable identifier. Format: GH-##### */
   userId: string;
   email: string;
   displayName: string | null;
   /** PRIVATE — never exposed to other normal users. */
   phoneNumber: string | null;
-  // تم إزالة photoURL بالكامل لتطبيق الدردشة النصية
+  photoURL: string | null;
   status: UserStatus;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -34,17 +34,14 @@ export interface PublicUserProfile {
   uid: string;
   userId: string;
   displayName: string | null;
-  // تم إزالة photoURL
-  status: UserStatus;
-  lastSeenAt: Timestamp | null;
+  status?: UserStatus;
+  lastSeenAt?: Timestamp | null;
 }
 
-export function toPublicUserProfile(user: UserDocument): PublicUserProfile {
+export function toPublicUserProfile(user: Pick<UserDocument, "uid" | "userId" | "displayName">): PublicUserProfile {
   return {
     uid: user.uid,
     userId: user.userId,
     displayName: user.displayName,
-    status: user.status,
-    lastSeenAt: user.lastSeenAt,
   };
 }

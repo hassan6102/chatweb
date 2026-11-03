@@ -16,6 +16,7 @@ export default function LoginPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -30,10 +31,13 @@ export default function LoginPage() {
 
   return (
     <>
-      <h1 className="text-xl font-semibold text-ink">Welcome back</h1>
-      <p className="mt-1 text-sm text-ink-muted">Log in to keep chatting.</p>
+      <div className="mb-7">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Welcome back</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">Sign in to your account</h1>
+        <p className="mt-2 text-sm leading-6 text-ink-muted">Pick up where your conversations left off.</p>
+      </div>
 
-      <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-4">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <TextField
           label="Email"
           type="email"
@@ -51,23 +55,23 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <Link href="/forgot-password" className="focus-ring mt-1.5 inline-block text-xs text-accent hover:underline">
+          <Link href="/forgot-password" className="focus-ring mt-2 inline-flex text-xs font-medium text-accent hover:underline">
             Forgot password?
           </Link>
         </div>
 
         {error && (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" aria-live="polite" className="rounded-lg border border-danger/20 bg-danger/10 px-3 py-2.5 text-sm text-danger">
             {error}
           </p>
         )}
 
-        <Button type="submit" disabled={submitting} fullWidth>
-          {submitting ? "Signing in…" : "Log in"}
+        <Button type="submit" disabled={submitting} fullWidth className="mt-1">
+          {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-ink-muted">
+      <p className="mt-7 border-t border-border pt-6 text-center text-sm text-ink-muted">
         New here?{" "}
         <Link href="/register" className="focus-ring font-medium text-accent hover:underline">
           Create an account

@@ -5,10 +5,12 @@ import {
   doc, 
   updateDoc, 
   getCountFromServer,
+  collectionGroup,
   Timestamp,
   query,
   where,
-  addDoc
+  addDoc,
+  type Query,
 } from "firebase/firestore";
 import { db } from "@/firebase/client";
 import type {
@@ -23,6 +25,7 @@ import type {
   ReportDocument,
   ReportStatus,
 } from "@/types/admin";
+import { normalizeAdminAccountStatus } from "@/types/admin";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/firebase/client";
 export interface PagedResult<T> {
@@ -38,41 +41,34 @@ export interface PagedResult<T> {
 
 export async function fetchOverviewStats(): Promise<AdminOverviewStats> {
   try {
-    const usersCount = await getCountFromServer(collection(db, "users"));
-    const convosCount = await getCountFromServer(collection(db, "conversations"));
-    const msgsCount = await getCountFromServer(collection(db, "messages"));
-    
-    // للحصول على الإحصائيات الحقيقية، يمكنك كتابة كويريز محددة هنا
-    const totalUsersVal = usersCount.data().count;
+    const usersRef = collection(db, "users");
+    const [usersCount, convosCount, msgsCount, onlineCount, disabledCount, openReportsCount, series] = await Promise.all([
+      getCountFromServer(usersRef),
+      getCountFromServer(collection(db, "conversations")),
+      getCountFromServer(collectionGroup(db, "messages")),
+      getCountFromServer(query(usersRef, where("status", "in", ["online", "active"]))),
+      getCountFromServer(query(usersRef, where("isDisabled", "==", true))),
+      getCountFromServer(query(collection(db, "reports"), where("status", "==", "open"))),
+      fetchStatisticsSeries(),
+    ]);
+    const messageVolume = series.messageVolume;
 
     return {
-      totalUsers: totalUsersVal,
-      activeUsers: totalUsersVal,
-      onlineUsers: 0, // يتطلب تتبع حالة الاتصال
+      totalUsers: usersCount.data().count,
+      activeUsers: Math.max(0, usersCount.data().count - disabledCount.data().count),
+      onlineUsers: onlineCount.data().count,
       totalConversations: convosCount.data().count,
       totalMessages: msgsCount.data().count,
-      messagesToday: 0,
-      messagesThisWeek: 0,
-      openReports: 0,
-      blockedUsers: 0,
-      storageUsageBytes: 0,
-      storageQuotaBytes: 10 * 1024 * 1024 * 1024, // 10GB كمثال
+      messagesToday: messageVolume[messageVolume.length - 1]?.value ?? 0,
+      messagesThisWeek: messageVolume.reduce((total, point) => total + point.value, 0),
+      openReports: openReportsCount.data().count,
+      blockedUsers: disabledCount.data().count,
+      storageUsageBytes: null,
+      storageQuotaBytes: null,
     };
   } catch (error) {
     console.error("Error fetching stats:", error);
-    return {
-      totalUsers: 0,
-      activeUsers: 0,
-      onlineUsers: 0,
-      totalConversations: 0,
-      totalMessages: 0,
-      messagesToday: 0,
-      messagesThisWeek: 0,
-      openReports: 0,
-      blockedUsers: 0,
-      storageUsageBytes: 0,
-      storageQuotaBytes: 0
-    };
+    throw error;
   }
 }
 
@@ -80,64 +76,67 @@ export async function fetchOverviewStats(): Promise<AdminOverviewStats> {
 // Charts & Series (الرسومات البيانية)
 // ---------------------------------------------------------------------------
 
-// دالة مساعدة لتوليد تواريخ آخر 7 أيام
-function getLast7DaysLabels() {
-  const dates = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-  }
-  return dates;
-}
-
 export async function fetchOverviewSeries() {
-  const dates = getLast7DaysLabels();
-  
-  try {
-    const usersCount = (await getCountFromServer(collection(db, "users"))).data().count;
-    const msgsCount = (await getCountFromServer(collection(db, "messages"))).data().count;
-
-    // توزيع الرقم الإجمالي على الأيام مع نسبة تذبذب بسيطة ليعطي منحنى واقعي
-    return { 
-      messageVolume: dates.map(date => ({ 
-        label: date, 
-        value: Math.max(0, Math.floor((msgsCount / 7) * (1 + (Math.random() * 0.4 - 0.2)))) 
-      })),
-      activeUsers: dates.map(date => ({ 
-        label: date, 
-        value: Math.max(0, Math.floor((usersCount / 7) * (1 + (Math.random() * 0.4 - 0.2)))) 
-      }))
-    };
-  } catch (error) {
-    return { messageVolume: [], activeUsers: [] };
-  }
+  const series = await fetchStatisticsSeries();
+  return { messageVolume: series.messageVolume, activeUsers: series.activeUsers };
 }
 
 export async function fetchStatisticsSeries() {
-  const dates = getLast7DaysLabels();
-
   try {
-    const usersCount = (await getCountFromServer(collection(db, "users"))).data().count;
-    const msgsCount = (await getCountFromServer(collection(db, "messages"))).data().count;
-    const convosCount = (await getCountFromServer(collection(db, "conversations"))).data().count;
-    const reportsCount = (await getCountFromServer(collection(db, "reports"))).data().count;
-
-    const generateSeries = (total: number) => dates.map(date => ({
-      label: date,
-      value: Math.max(0, Math.floor((total / 7) * (1 + (Math.random() * 0.4 - 0.2))))
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (6 - index));
+      return date;
+    });
+    const weeks = Array.from({ length: 8 }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (7 * (7 - index)));
+      return date;
+    });
+    const usersRef = collection(db, "users");
+    const messagesRef = collectionGroup(db, "messages");
+    const conversationsRef = collection(db, "conversations");
+    const reportsRef = collection(db, "reports");
+    const nextDay = (start: Date) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+    const nextWeek = (start: Date) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+    const countRange = async (target: Query, field: string, start: Date, end: Date) => {
+      const result = await getCountFromServer(query(
+        target,
+        where(field, ">=", Timestamp.fromDate(start)),
+        where(field, "<", Timestamp.fromDate(end))
+      ));
+      return result.data().count;
+    };
+    const [activeCounts, messageCounts, userGrowth, newConversations, reportCounts, blockedCount] = await Promise.all([
+      Promise.all(days.map((date) => countRange(usersRef, "lastSeenAt", date, nextDay(date)))),
+      Promise.all(days.map((date) => countRange(messagesRef, "createdAt", date, nextDay(date)))),
+      Promise.all(weeks.map((date) => countRange(usersRef, "createdAt", date, nextWeek(date)))),
+      Promise.all(weeks.map((date) => countRange(conversationsRef, "createdAt", date, nextWeek(date)))),
+      Promise.all(weeks.map((date) => countRange(reportsRef, "createdAt", date, nextWeek(date)))),
+      getCountFromServer(query(usersRef, where("isDisabled", "==", true))).then((result) => result.data().count),
+    ]);
+    const dayPoints = (counts: number[]) => counts.map((value, index) => ({
+      label: days[index]!.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      value,
+    }));
+    const weekPoints = (counts: number[]) => counts.map((value, index) => ({
+      label: weeks[index]!.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      value,
     }));
 
     return {
-      userGrowth: generateSeries(usersCount),
-      activeUsers: generateSeries(usersCount * 0.8), // افتراض أن 80% نشطين
-      messageVolume: generateSeries(msgsCount),
-      newConversations: generateSeries(convosCount),
-      reports: generateSeries(reportsCount),
-      blockedUsers: generateSeries(Math.floor(usersCount * 0.05)) // افتراض أن 5% محظورين
+      userGrowth: weekPoints(userGrowth),
+      activeUsers: dayPoints(activeCounts),
+      messageVolume: dayPoints(messageCounts),
+      newConversations: weekPoints(newConversations),
+      reports: weekPoints(reportCounts),
+      blockedUsers: [{ label: "Current", value: blockedCount }],
     };
   } catch (error) {
-    return { userGrowth: [], activeUsers: [], messageVolume: [], newConversations: [], reports: [], blockedUsers: [] };
+    console.error("Error fetching statistics series:", error);
+    throw error;
   }
 }
 // ---------------------------------------------------------------------------
@@ -210,7 +209,7 @@ export async function fetchUserByUid(uid: string): Promise<AdminUserRow | null> 
       email: data.email || "",
       phoneNumber: data.phoneNumber || null,
       photoURL: data.photoURL || data.avatarUrl || null,
-      accountStatus: (data.accountStatus || "active") as AdminAccountStatus,
+      accountStatus: normalizeAdminAccountStatus(data.accountStatus, data.isDisabled),
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.fromMillis(Date.now()),
       lastLoginAt: data.lastLoginAt instanceof Timestamp ? data.lastLoginAt : null,
       lastSeenAt: data.lastSeenAt instanceof Timestamp ? data.lastSeenAt : null,
@@ -254,8 +253,8 @@ export async function fetchConversations(params: ConversationSearchParams): Prom
       items.push({
         conversationId: docSnap.id,
         type: data.type === "group" ? "group" : "direct",
-        participantUserIds: data.participantUserIds || [],
-        participantUids: data.participantUids || data.participants || [],
+        participantUserIds: data.memberUids || [],
+        participantUids: data.memberUids || [],
         messageCount: data.messageCount || 0,
         lastMessage: data.lastMessage || null,
         lastMessageAt: data.lastMessageAt instanceof Timestamp ? data.lastMessageAt : null,
@@ -280,8 +279,8 @@ export async function fetchConversationById(id: string): Promise<AdminConversati
     return {
       conversationId: docSnap.id,
       type: data.type === "group" ? "group" : "direct",
-      participantUserIds: data.participantUserIds || [],
-      participantUids: data.participantUids || data.participants || [],
+      participantUserIds: data.memberUids || [],
+      participantUids: data.memberUids || [],
       messageCount: data.messageCount || 0,
       lastMessage: data.lastMessage || null,
       lastMessageAt: data.lastMessageAt instanceof Timestamp ? data.lastMessageAt : null,
@@ -492,13 +491,7 @@ export async function forceLogout(uid: string): Promise<{ ok: true }> {
 }
 export async function fetchConversationMessages(id: string): Promise<AdminMessageRow[]> {
   try {
-    // بناء استعلام لجلب الرسائل المرتبطة بمعرف المحادثة الحالي
-    // إذا كانت رسائلك مخزنة كـ Subcollection داخل المحادثة، استبدل السطرين التاليين بـ:
-    // const q = query(collection(db, "conversations", id, "messages"));
-    const messagesRef = collection(db, "messages");
-    const q = query(messagesRef, where("conversationId", "==", id));
-
-    const snap = await getDocs(q);
+    const snap = await getDocs(collection(db, "conversations", id, "messages"));
     let items: AdminMessageRow[] = [];
 
     snap.forEach((docSnap) => {

@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "./Icon";
-import { CURRENT_USER } from "@/lib/mock/mockUsers";
-import { MOCK_NOTIFICATIONS } from "@/lib/mock/mockNotifications";
 import { Avatar } from "./Avatar";
+import { useAuth } from "@/hooks/useAuth";
 
 const TAB_ROUTES = ["/", "/notifications", "/settings", "/profile"];
 
@@ -17,9 +16,8 @@ const TABS: { href: string; label: string; icon: Parameters<typeof Icon>[0]["nam
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { user } = useAuth();
   if (!TAB_ROUTES.includes(pathname)) return null;
-
-  const unread = MOCK_NOTIFICATIONS.filter((n) => !n.read).length;
 
   return (
     <nav
@@ -40,11 +38,6 @@ export function BottomNav() {
           >
             <span className="relative">
               <Icon name={tab.icon} size={22} />
-              {tab.href === "/notifications" && unread > 0 && (
-                <span className="absolute -right-1.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[9px] font-semibold text-white">
-                  {unread}
-                </span>
-              )}
             </span>
             {tab.label}
           </Link>
@@ -55,7 +48,7 @@ export function BottomNav() {
         aria-current={pathname === "/profile" ? "page" : undefined}
         className="focus-ring flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] text-ink-faint"
       >
-        <Avatar name={CURRENT_USER.displayName} userId={CURRENT_USER.userId} size="sm" />
+        <Avatar name={user?.displayName || "Account"} userId={user?.uid || "account"} size="sm" />
         You
       </Link>
     </nav>

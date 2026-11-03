@@ -1,14 +1,24 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { SideRail } from "@/components/common/SideRail";
 import { BottomNav } from "@/components/common/BottomNav";
 import { ConversationList } from "@/components/conversations/ConversationList";
+import { useAuth } from "@/hooks/useAuth";
+import { startPresence } from "@/lib/realtime/presence";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const activeConversationId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : undefined;
+  const { user } = useAuth();
+  const userId = user?.uid;
+
+  useEffect(() => {
+    if (!userId) return;
+    return startPresence(userId);
+  }, [userId]);
 
   return (
     <ProtectedRoute>

@@ -1,123 +1,123 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { collection, doc, onSnapshot, query, updateDoc, deleteDoc, orderBy } from "firebase/firestore";
-import { db } from "@/firebase/client"; // تأكد أن هذا المسار يطابق ملف إعداد Firebase لديك
-import { useAuth } from "@/hooks/useAuth"; // خطاف المصادقة الفعلي لجلب بيانات المستخدم
+import { collection, deleteDoc, doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { db } from "@/firebase/client";
+import { useAuth } from "@/hooks/useAuth";
+import type { UserConversationPreview } from "@/types/conversation";
+
+function timestampValue(value: UserConversationPreview["lastMessageAt"]): number {
+  return value?.toMillis() ?? 0;
+}
 
 export function useConversations() {
   const [loading, setLoading] = useState(true);
-  const [conversations, setConversations] = useState<any[]>([]);
-  const { user } = useAuth(); // الحصول على المستخدم المسجل حالياً
+  const [error, setError] = useState<Error | null>(null);
+  const [conversations, setConversations] = useState<UserConversationPreview[]>([]);
+  const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    // إذا لم يكن هناك مستخدم مسجل، قم بتفريغ القائمة
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+
     if (!user?.uid) {
       setConversations([]);
+      setError(null);
       setLoading(false);
       return;
     }
 
-    // الاستماع اللحظي لمسار المحادثات الخاص بالمستخدم في Firestore
-    const q = query(collection(db, "users", user.uid, "conversations"));
+    setLoading(true);
+    setConversations([]);
+    setError(null);
+    const inboxRef = collection(db, "users", user.uid, "conversations");
 
-    const unsubscribe = onSnapshot(
-      q,
+    return onSnapshot(
+      inboxRef,
       (snapshot) => {
-        const data = snapshot.docs.map((doc) => ({
-          conversationId: doc.id,
-          ...doc.data(),
-        }));
-        
-        // ترتيب المحادثات حسب وقت التحديث (الأحدث أولاً)
-        data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0));
-        
+        const data = snapshot.docs.map(
+          (conversationDoc) =>
+            ({
+              ...conversationDoc.data(),
+              conversationId: conversationDoc.id,
+            }) as UserConversationPreview
+        );
+        data.sort((a, b) => timestampValue(b.lastMessageAt) - timestampValue(a.lastMessageAt));
         setConversations(data);
+        setError(null);
         setLoading(false);
       },
-      (error) => {
-        console.error("Error fetching conversations:", error);
+      (snapshotError) => {
+        console.error("Error fetching inbox:", snapshotError);
+        setError(snapshotError);
         setLoading(false);
       }
     );
+  }, [authLoading, user?.uid]);
 
-    // إيقاف الاستماع عند إغلاق المكون
-    return () => unsubscribe();
-  }, [user?.uid]);
-
-  // دالة مساعدة لتحديث الحقول في قاعدة البيانات
   const updateConversation = useCallback(
-    async (conversationId: string, data: any) => {
-      if (!user?.uid) return;
-      try {
-        const ref = doc(db, "users", user.uid, "conversations", conversationId);
-        await updateDoc(ref, data);
-      } catch (error) {
-        console.error("Failed to update conversation:", error);
-      }
+    async (conversationId: string, data: Partial<UserConversationPreview>) => {
+      if (!user?.uid) throw new Error("You must be signed in to update a conversation.");
+      const ref = doc(db, "users", user.uid, "conversations", conversationId);
+      await updateDoc(ref, data);
     },
     [user?.uid]
   );
 
   const togglePin = useCallback(
-    (conversationId: string) => {
-      const current = conversations.find((c) => c.conversationId === conversationId);
-      if (current) updateConversation(conversationId, { pinned: !current.pinned });
+    async (conversationId: string) => {
+      const current = conversations.find((conversation) => conversation.conversationId === conversationId);
+      if (current) await updateConversation(conversationId, { pinned: !current.pinned });
     },
     [conversations, updateConversation]
   );
 
   const toggleMute = useCallback(
-    (conversationId: string) => {
-      const current = conversations.find((c) => c.conversationId === conversationId);
-      if (current) updateConversation(conversationId, { muted: !current.muted });
+    async (conversationId: string) => {
+      const current = conversations.find((conversation) => conversation.conversationId === conversationId);
+      if (current) await updateConversation(conversationId, { muted: !current.muted });
     },
     [conversations, updateConversation]
   );
 
   const toggleArchive = useCallback(
-    (conversationId: string) => {
-      const current = conversations.find((c) => c.conversationId === conversationId);
-      if (current) updateConversation(conversationId, { archived: !current.archived });
+    async (conversationId: string) => {
+      const current = conversations.find((conversation) => conversation.conversationId === conversationId);
+      if (current) await updateConversation(conversationId, { archived: !current.archived });
     },
     [conversations, updateConversation]
   );
 
   const deleteLocally = useCallback(
     async (conversationId: string) => {
-      if (!user?.uid) return;
-      try {
-        const ref = doc(db, "users", user.uid, "conversations", conversationId);
-        await deleteDoc(ref);
-      } catch (error) {
-        console.error("Failed to delete conversation:", error);
-      }
+      if (!user?.uid) throw new Error("You must be signed in to remove a conversation.");
+      await deleteDoc(doc(db, "users", user.uid, "conversations", conversationId));
     },
     [user?.uid]
   );
 
   const rename = useCallback(
-    (conversationId: string, customName: string | null) => {
-      updateConversation(conversationId, { customName });
-    },
+    (conversationId: string, customName: string | null) =>
+      updateConversation(conversationId, { customName }),
     [updateConversation]
   );
 
   const markRead = useCallback(
-    (conversationId: string) => {
-      updateConversation(conversationId, { unreadCount: 0 });
-    },
+    (conversationId: string) => updateConversation(conversationId, { unreadCount: 0 }),
     [updateConversation]
   );
 
-  return { 
-    conversations, 
-    loading, 
-    togglePin, 
-    toggleMute, 
-    toggleArchive, 
-    deleteLocally, 
-    rename, 
-    markRead 
+  return {
+    conversations,
+    loading,
+    error,
+    togglePin,
+    toggleMute,
+    toggleArchive,
+    deleteLocally,
+    rename,
+    markRead,
   };
 }

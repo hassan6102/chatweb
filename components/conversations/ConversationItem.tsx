@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/common/Icon";
+import { Avatar } from "@/components/common/Avatar";
 import { formatRelativeTime } from "@/lib/mock/timestamp";
-import { auth } from "@/firebase/client";
 
 export function ConversationItem({
   conversation,
@@ -25,27 +25,21 @@ export function ConversationItem({
   onDelete: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const myUid = auth.currentUser?.uid;
-  
-  const customName = myUid && conversation.customNames ? conversation.customNames[myUid] : null;
-  const displayName = customName || otherUser?.displayName || otherUser?.userId || "مستخدم";
-  const isMuted = myUid ? (conversation.mutedBy || []).includes(myUid) : false;
-
-  // السطر ده لضبط قراءة الوقت في القائمة الجانبية
-  const timeMs = typeof conversation.updatedAt === "number" 
-    ? conversation.updatedAt 
-    : (conversation.updatedAt?.toMillis ? conversation.updatedAt.toMillis() : Date.now());
+  const displayName = conversation.customName || otherUser?.displayName || otherUser?.userId || "Contact";
+  const isMuted = conversation.muted === true;
+  const timeMs = conversation.lastMessageAt?.toMillis?.() ?? null;
 
   return (
     <div
-      className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition ${
-        active ? "bg-accent/10" : "hover:bg-surface-sunken"
+      className={`group relative flex items-center gap-3 rounded-xl border px-3 py-3 transition ${
+        active ? "border-accent/20 bg-accent/10" : "border-transparent hover:bg-surface-sunken"
       }`}
     >
       <button
         onClick={onOpen}
         className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left"
       >
+        <Avatar name={displayName} userId={conversation.conversationId} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
@@ -59,9 +53,7 @@ export function ConversationItem({
                 <Icon name="mute" size={12} className="shrink-0 text-ink-faint" />
               )}
             </span>
-            <span className="shrink-0 text-xs text-ink-faint">
-              {formatRelativeTime(timeMs)}
-            </span>
+            {timeMs !== null && <span className="shrink-0 text-[11px] text-ink-faint">{formatRelativeTime(timeMs)}</span>}
           </span>
           <span className="mt-0.5 flex items-center justify-between gap-2">
             <span dir="auto" className="truncate text-xs text-ink-muted">
@@ -92,7 +84,15 @@ export function ConversationItem({
               <MenuAction icon="pin" label={conversation.pinned ? "Unpin" : "Pin"} onClick={() => { onTogglePin(); setMenuOpen(false); }} />
               <MenuAction icon="mute" label={isMuted ? "Unmute" : "Mute"} onClick={() => { onToggleMute(); setMenuOpen(false); }} />
               <MenuAction icon="archive" label={conversation.archived ? "Unarchive" : "Archive"} onClick={() => { onToggleArchive(); setMenuOpen(false); }} />
-              <MenuAction icon="trash" label="Delete" danger onClick={() => { onDelete(); setMenuOpen(false); }} />
+              <MenuAction
+                icon="trash"
+                label="Remove from inbox"
+                danger
+                onClick={() => {
+                  onDelete();
+                  setMenuOpen(false);
+                }}
+              />
             </div>
           </>
         )}

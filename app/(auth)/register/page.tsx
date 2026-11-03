@@ -23,6 +23,7 @@ export default function RegisterPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     setError(null);
     if (password !== confirm) return;
     setSubmitting(true);
@@ -39,10 +40,15 @@ export default function RegisterPage() {
 
   return (
     <>
-      <h1 className="text-xl font-semibold text-ink">Create your account</h1>
-      <p className="mt-1 text-sm text-ink-muted">You&apos;ll get a unique User ID to share with people you chat with.</p>
+      <div className="mb-7">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">Get started</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">Create your account</h1>
+        <p className="mt-2 text-sm leading-6 text-ink-muted">
+          You&apos;ll get a unique User ID to share with people you chat with.
+        </p>
+      </div>
 
-      <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-4">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <TextField
           label="Email"
           type="email"
@@ -52,7 +58,6 @@ export default function RegisterPage() {
           onChange={(e) => setEmail(e.target.value)}
         />
         
-        {/* حقل إدخال رقم الموبايل (إجباري) */}
         <TextField
           label="Phone Number"
           type="tel"
@@ -61,6 +66,9 @@ export default function RegisterPage() {
           value={phoneNumber}
           onChange={(e) => setPhoneNumber(e.target.value)}
         />
+        <p className="-mt-3 text-xs leading-5 text-ink-faint">
+          Your phone number is private and is only visible to authorized administrators.
+        </p>
 
         <TextField
           label="Password"
@@ -82,17 +90,17 @@ export default function RegisterPage() {
         />
 
         {error && (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" aria-live="polite" className="rounded-lg border border-danger/20 bg-danger/10 px-3 py-2.5 text-sm text-danger">
             {error}
           </p>
         )}
 
-        <Button type="submit" disabled={submitting || !!confirmError} fullWidth>
+        <Button type="submit" disabled={submitting || !!confirmError} fullWidth className="mt-1">
           {submitting ? "Creating account…" : "Create account"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-ink-muted">
+      <p className="mt-7 border-t border-border pt-6 text-center text-sm text-ink-muted">
         Already have an account?{" "}
         <Link href="/login" className="focus-ring font-medium text-accent hover:underline">
           Log in

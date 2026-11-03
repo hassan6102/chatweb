@@ -26,7 +26,7 @@ const ACCOUNT_STATUS_TONE: Record<string, Tone> = {
 };
 
 export function AccountStatusBadge({ status }: { status: string }) {
-  const label = status === "active" ? "Active" : status === "disabled" ? "Disabled" : "Blocked";
+  const label = status === "active" ? "Active" : status === "disabled" ? "Disabled" : status === "blocked" ? "Blocked" : "Unknown";
   return <Badge tone={ACCOUNT_STATUS_TONE[status] ?? "neutral"}>{label}</Badge>;
 }
 

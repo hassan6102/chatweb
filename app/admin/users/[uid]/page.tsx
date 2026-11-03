@@ -9,7 +9,7 @@ import { AccountStatusBadge, ReportStatusBadge } from "@/components/admin/ui/Bad
 import { UserActionsMenu } from "@/components/admin/UserActionsMenu";
 import { PermissionGate } from "@/components/admin/ui/PermissionGate";
 import { useAdminAuth } from "@/lib/admin/adminAuth";
-import { hasPermission, type AdminRole, type AdminConversationRow, type AdminLogDocument, type AdminUserRow, type ReportDocument, ADMIN_ACTION_LABEL } from "@/types/admin";
+import { hasPermission, normalizeAdminAccountStatus, type AdminRole, type AdminConversationRow, type AdminLogDocument, type AdminUserRow, type ReportDocument, ADMIN_ACTION_LABEL } from "@/types/admin";
 import { formatDateTime, formatRelativeTime, maskEmail, maskPhoneNumber } from "@/lib/admin/format";
 import { ChevronLeftIcon, ChatIcon, ClockIcon } from "@/components/admin/icons";
 
@@ -68,7 +68,7 @@ export default function UserDetailPage() {
 
         // حساب عدد المحادثات الفعلي
         try {
-          const convQ = query(collection(db, "conversations"), where("participants", "array-contains", uid));
+          const convQ = query(collection(db, "conversations"), where("memberUids", "array-contains", uid));
           const cSnap = await getCountFromServer(convQ);
           cCount = cSnap.data().count;
         } catch (e) {
@@ -91,14 +91,14 @@ export default function UserDetailPage() {
             displayName: data.displayName || "No name",
             email: data.email || "",
             phoneNumber: data.phoneNumber || "",
-            accountStatus: (data.accountStatus || data.status || "active") as any,
+            accountStatus: normalizeAdminAccountStatus(data.accountStatus, data.isDisabled),
             role: data.role || "user",
             conversationCount: cCount,
             messageCount: mCount,
             createdAt: getTimestampMs(data.createdAt || data.timestamp),
-            lastLoginAt: getTimestampMs(data.lastLoginAt),
+            lastLoginAt: data.lastLoginAt ? new Date(getTimestampMs(data.lastLoginAt)) : null,
             lastSeenAt: getTimestampMs(data.lastSeenAt || data.updatedAt),
-            isOnline: data.status === "online" || data.status === "active",
+            isOnline: data.status === "online",
           } as any);
         }
       } catch (err) {
@@ -121,7 +121,7 @@ export default function UserDetailPage() {
     if (tab === "conversations" && conversations === null && uid) {
       const loadUserConvs = async () => {
         try {
-          const convQ = query(collection(db, "conversations"), where("participants", "array-contains", uid));
+          const convQ = query(collection(db, "conversations"), where("memberUids", "array-contains", uid));
           const snap = await getDocs(convQ);
           const userConvs = snap.docs.map(doc => {
             const data = doc.data();
@@ -179,7 +179,11 @@ export default function UserDetailPage() {
             <div className="flex items-center gap-3">
               <div className="min-w-0">
                 <p className="truncate text-[15px] font-semibold text-admin-text">{user.email || "بدون إيميل"}</p>
-                <p className="truncate text-[13px] text-admin-accent mt-0.5" dir="ltr">{user.phoneNumber || "بدون رقم هاتف"}</p>
+                <p className="truncate text-[13px] text-admin-accent mt-0.5" dir="ltr">
+                  {user.phoneNumber
+                    ? canViewPrivate ? user.phoneNumber : maskPhoneNumber(user.phoneNumber)
+                    : "بدون رقم هاتف"}
+                </p>
                 <p className="font-adminMono text-[11px] text-admin-textFaint mt-1">ID: {user.userId}</p>
               </div>
             </div>

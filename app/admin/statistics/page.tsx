@@ -53,7 +53,7 @@ export default function AdminStatisticsPage() {
         <ChartCard title="Reports filed, last 8 weeks">
           {series ? <BarChart data={series.reports} color="#C4392B" /> : <LoadingCard lines={4} />}
         </ChartCard>
-        <ChartCard title="Blocked users, cumulative">
+        <ChartCard title="Blocked users, current">
           {series ? <LineChart data={series.blockedUsers} color="#B7791F" /> : <LoadingCard lines={4} />}
         </ChartCard>
       </div>

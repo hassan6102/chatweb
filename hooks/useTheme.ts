@@ -7,7 +7,7 @@ import type { ThemePreference } from "@/types/ui";
 const STORAGE_KEY = "theme-preference";
 
 export function useTheme() {
-  const [theme, setTheme] = useLocalStorage<ThemePreference>(STORAGE_KEY, "system");
+  const [theme, setTheme] = useLocalStorage<ThemePreference>(STORAGE_KEY, "dark");
 
   useEffect(() => {
     const root = document.documentElement;

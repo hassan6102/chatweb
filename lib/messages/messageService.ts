@@ -55,6 +55,7 @@ export async function sendMessage(params: {
 
     const previewText = type === "text" ? text : `[${type}]`;
     tx.update(conversationRef, {
+      lastMessageId: messageRef.id,
       lastMessage: previewText,
       lastMessageAt: now,
       updatedAt: now,
@@ -67,6 +68,7 @@ export async function sendMessage(params: {
         {
           lastMessage: previewText,
           lastMessageAt: now,
+          lastMessageId: messageRef.id,
           ...(uid === senderId ? {} : { unreadCount: increment(1) }),
         },
         { merge: true }

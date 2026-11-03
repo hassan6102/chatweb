@@ -1,4 +1,4 @@
-import { ref, onValue, onDisconnect, set, serverTimestamp, off } from "firebase/database";
+import { ref, onValue, onDisconnect, set, serverTimestamp } from "firebase/database";
 import { rtdb } from "@/firebase/client";
 
 /**
@@ -13,17 +13,24 @@ export function startPresence(uid: string): () => void {
   const unsubscribe = onValue(connectedRef, (snap) => {
     if (snap.val() !== true) return;
 
-    onDisconnect(statusRef)
+    void onDisconnect(statusRef)
       .set({ state: "offline", lastSeenAt: serverTimestamp() })
       .then(() => {
-        set(statusRef, { state: "online", lastSeenAt: serverTimestamp() });
+        return set(statusRef, { state: "online", lastSeenAt: serverTimestamp() });
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to update user presence:", error);
       });
   });
 
   return () => {
     unsubscribe();
-    off(connectedRef);
   };
+}
+
+export function stopPresence(uid: string): Promise<void> {
+  const statusRef = ref(rtdb, `status/${uid}`);
+  return set(statusRef, { state: "offline", lastSeenAt: serverTimestamp() });
 }
 
 /**

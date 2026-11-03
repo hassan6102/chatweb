@@ -9,49 +9,50 @@ import { MessageBubble } from "./MessageBubble";
 import { DateSeparator } from "./DateSeparator";
 import { TypingIndicator } from "./TypingIndicator";
 import { formatDateSeparator } from "@/lib/mock/timestamp";
-import { auth } from "@/firebase/client"; 
-import type { ReactionEmoji } from "@/types/ui";
 
 export function MessageList({
   messages,
   loading,
-  pinnedIds,
+  error,
+  hasMore,
+  loadingOlder,
+  onLoadOlder,
+  currentUserId,
   otherUserTyping,
   onReply,
   onEdit,
-  onDeleteForMe,
   onDeleteForEveryone,
   onDeleteMany,
   onCopy,
-  onForward,
-  onForwardMany,
-  onTogglePinMessage,
-  onReact,
   onOpenImage,
 }: {
   messages: any[];
   loading: boolean;
-  pinnedIds: string[];
+  error: Error | null;
+  hasMore: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => void;
+  currentUserId: string | null;
   otherUserTyping?: boolean;
   onReply: (message: any) => void;
   onEdit: (message: any) => void;
-  onDeleteForMe: (messageId: string) => void;
   onDeleteForEveryone: (messageId: string) => void;
   onDeleteMany: (messageIds: string[]) => void;
   onCopy: (message: any) => void;
-  onForward: (message: any) => void;
-  onForwardMany: (messageIds: string[]) => void;
-  onTogglePinMessage: (messageId: string) => void;
-  onReact: (messageId: string, emoji: ReactionEmoji | null) => void;
   onOpenImage: (message: any) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, loading]);
+    const lastMessageId = messages[messages.length - 1]?.messageId ?? null;
+    if (lastMessageId && lastMessageId !== lastMessageIdRef.current) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
+    lastMessageIdRef.current = lastMessageId;
+  }, [messages]);
 
   useEffect(() => {
     if (!selectionMode) setSelectedIds([]);
@@ -86,6 +87,15 @@ export function MessageList({
   if (loading) return <MessageListSkeleton />;
 
   if (messages.length === 0) {
+    if (error) {
+      return (
+        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
+          <p role="alert" className="max-w-sm text-sm text-danger">
+            Messages could not be loaded. Check your connection and try again.
+          </p>
+        </div>
+      );
+    }
     return (
       <EmptyState
         icon="send"
@@ -107,13 +117,6 @@ export function MessageList({
           </div>
           <div className="flex items-center gap-1">
             <IconButton
-              aria-label="Forward selected"
-              disabled={selectedIds.length === 0}
-              onClick={() => onForwardMany(selectedIds)}
-            >
-              <Icon name="forward" size={18} />
-            </IconButton>
-            <IconButton
               aria-label="Delete selected"
               disabled={selectedIds.length === 0}
               onClick={() => {
@@ -128,6 +131,21 @@ export function MessageList({
       )}
 
       <div className="flex flex-1 flex-col gap-1.5 px-3 py-3 sm:px-5">
+        {error && (
+          <p role="alert" className="mx-auto mb-2 max-w-lg rounded-lg border border-danger/20 bg-danger/10 px-3 py-2 text-center text-xs text-danger">
+            Some conversation updates could not be loaded.
+          </p>
+        )}
+        {hasMore && (
+          <button
+            type="button"
+            disabled={loadingOlder}
+            onClick={onLoadOlder}
+            className="focus-ring mx-auto mb-2 rounded-full border border-border bg-surface-raised px-4 py-2 text-xs font-medium text-ink-muted hover:text-ink disabled:opacity-60"
+          >
+            {loadingOlder ? "Loading older messages…" : "Load older messages"}
+          </button>
+        )}
         {groups.map((group) => (
           <div key={group.label}>
             <DateSeparator label={group.label} />
@@ -136,9 +154,8 @@ export function MessageList({
                 <MessageBubble
                   key={message.messageId}
                   message={message}
-                  isOwn={message.senderId === auth.currentUser?.uid} 
+                  isOwn={message.senderId === currentUserId}
                   replyToMessage={message.replyTo ? messageById.get(message.replyTo) ?? null : null}
-                  isPinned={pinnedIds.includes(message.messageId)}
                   selectionMode={selectionMode}
                   selected={selectedIds.includes(message.messageId)}
                   onToggleSelect={() => {
@@ -147,12 +164,8 @@ export function MessageList({
                   }}
                   onReply={() => onReply(message)}
                   onEdit={() => onEdit(message)}
-                  onDeleteForMe={() => onDeleteForMe(message.messageId)}
                   onDeleteForEveryone={() => onDeleteForEveryone(message.messageId)}
                   onCopy={() => onCopy(message)}
-                  onForward={() => onForward(message)}
-                  onTogglePin={() => onTogglePinMessage(message.messageId)}
-                  onReact={(emoji) => onReact(message.messageId, emoji)}
                   onOpenImage={() => onOpenImage(message)}
                 />
               ))}

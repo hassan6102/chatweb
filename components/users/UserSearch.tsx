@@ -1,92 +1,79 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/common/Icon";
 import { Button } from "@/components/common/Button";
-import { auth, db } from "@/firebase/client";
-import { collection, query, where, getDocs, addDoc, serverTimestamp } from "firebase/firestore";
+import { auth } from "@/firebase/client";
+import { createOrGetDirectConversation } from "@/lib/conversations/createOrGetDirectConversation";
+import { findUserByUserId } from "@/lib/users/findUserByUserId";
+import { isValidUserId } from "@/utils/userId";
+import type { PublicUserProfile } from "@/types/user";
 
 export function UserSearch() {
   const router = useRouter();
   const [value, setValue] = useState("");
-  const [status, setStatus] = useState<"idle" | "searching" | "found" | "not-found" | "invalid">("idle");
-  const [result, setResult] = useState<any | null>(null);
+  const [status, setStatus] = useState<"idle" | "searching" | "found" | "not-found" | "invalid" | "error">("idle");
+  const [result, setResult] = useState<PublicUserProfile | null>(null);
   const [isStartingChat, setIsStartingChat] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const requestId = useRef(0);
 
   async function handleChange(next: string) {
-    const cleaned = next.toUpperCase();
+    const cleaned = next.trim().toUpperCase();
+    const currentRequestId = ++requestId.current;
     setValue(cleaned);
     setResult(null);
+    setActionError(null);
 
     if (!cleaned) {
       setStatus("idle");
       return;
     }
 
-    if (!cleaned.startsWith("USER-") || cleaned.length < 6) {
-      setStatus(cleaned.length >= 10 ? "invalid" : "idle");
+    if (cleaned.length < 8) {
+      setStatus("idle");
+      return;
+    }
+
+    if (!isValidUserId(cleaned)) {
+      setStatus("invalid");
       return;
     }
 
     setStatus("searching");
 
     try {
-      const q = query(collection(db, "users"), where("userId", "==", cleaned));
-      const querySnapshot = await getDocs(q);
-
-      const firstDoc = querySnapshot.docs[0];
-      
-      if (!firstDoc) {
+      const user = await findUserByUserId(cleaned);
+      if (currentRequestId !== requestId.current) return;
+      if (!user) {
         setStatus("not-found");
       } else {
-        setResult({ uid: firstDoc.id, ...firstDoc.data() });
+        setResult(user);
         setStatus("found");
       }
     } catch (error) {
       console.error("Search error:", error);
-      setStatus("not-found");
+      if (currentRequestId === requestId.current) setStatus("error");
     }
   }
 
-  async function startChat(otherUid: string) {
+  async function startChat(otherUid: string, otherUserId: string) {
     const myUid = auth.currentUser?.uid;
-    if (!myUid) return;
+    if (!myUid) {
+      setActionError("Please sign in again to start a conversation.");
+      return;
+    }
 
     setIsStartingChat(true);
+    setActionError(null);
 
     try {
-      // 1. البحث عن محادثة موجودة مسبقاً بين الطرفين
-      const q = query(collection(db, "conversations"), where("participants", "array-contains", myUid));
-      const snap = await getDocs(q);
-      let existingConvId = null;
-
-      snap.forEach(doc => {
-        const data = doc.data();
-        // التأكد أن الطرف الآخر موجود في نفس المحادثة
-        if (data.participants && data.participants.includes(otherUid)) {
-          existingConvId = doc.id;
-        }
-      });
-
-      if (existingConvId) {
-        // إذا وجدت محادثة، افتحها
-        router.push(`/chat/${existingConvId}`);
-      } else {
-        // إذا لم توجد، قم بإنشاء محادثة جديدة في قاعدة البيانات
-        const newConvRef = await addDoc(collection(db, "conversations"), {
-          participants: [myUid, otherUid],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          lastMessage: null,
-          unreadCount: 0
-        });
-        // ثم افتح المحادثة الجديدة
-        router.push(`/chat/${newConvRef.id}`);
-      }
+      const conversationId = await createOrGetDirectConversation(myUid, otherUid, otherUserId);
+      router.push(`/chat/${conversationId}`);
     } catch (error) {
       console.error("Error creating conversation:", error);
-      alert("حدث خطأ أثناء بدء المحادثة. تأكد من قواعد الأمان (Rules) في Firestore.");
+      setActionError("Could not start this conversation. Please try again.");
     } finally {
       setIsStartingChat(false);
     }
@@ -108,19 +95,19 @@ export function UserSearch() {
             id="user-id-search"
             value={value}
             onChange={(e) => handleChange(e.target.value)}
-            placeholder="e.g. USER-45912"
+            placeholder="e.g. GH-92841"
             autoComplete="off"
             aria-describedby="user-id-hint"
             className="focus-ring w-full rounded-lg border border-border bg-surface py-2.5 pl-9 pr-3 font-mono text-sm uppercase tracking-wide text-ink placeholder:normal-case placeholder:tracking-normal placeholder:text-ink-faint"
           />
         </div>
         <p id="user-id-hint" className="mt-1.5 text-xs text-ink-faint">
-          Every person has a unique ID like USER-45912. Ask them for theirs.
+          Every person has a unique ID like GH-92841. Ask them for theirs.
         </p>
       </div>
 
       {status === "invalid" && (
-        <p className="text-sm text-danger">That doesn&apos;t look like a valid User ID (format: USER-#####).</p>
+        <p className="text-sm text-danger">That doesn&apos;t look like a valid User ID (format: GH-#####).</p>
       )}
 
       {status === "searching" && (
@@ -135,24 +122,34 @@ export function UserSearch() {
       {status === "not-found" && (
         <p className="text-sm text-ink-muted">No user found with ID &ldquo;{value}&rdquo;.</p>
       )}
+      {status === "error" && (
+        <p role="alert" className="text-sm text-danger">
+          User search is unavailable. Please try again later.
+        </p>
+      )}
 
       {status === "found" && result && (
         <div className="flex items-center gap-3 rounded-xl border border-border p-3">
           <div className="min-w-0 flex-1">
             {/* إخفاء الإيميل وعرض كلمة مستخدم أو اسم العرض */}
             <p dir="auto" className="truncate text-sm font-medium text-ink">
-              {result.displayName || "USER"}
+              {result.displayName || "User"}
             </p>
             <p className="font-mono text-xs text-ink-faint">{result.userId}</p>
           </div>
           {result.uid === auth.currentUser?.uid ? (
             <p className="text-xs text-ink-faint">This is you</p>
           ) : (
-            <Button onClick={() => startChat(result.uid)} disabled={isStartingChat}>
+            <Button onClick={() => startChat(result.uid, result.userId)} disabled={isStartingChat}>
               {isStartingChat ? "جاري..." : "Message"}
             </Button>
           )}
         </div>
+      )}
+      {actionError && (
+        <p role="alert" className="text-sm text-danger">
+          {actionError}
+        </p>
       )}
     </div>
   );

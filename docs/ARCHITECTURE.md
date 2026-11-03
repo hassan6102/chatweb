@@ -44,24 +44,22 @@ functions/            Cloud Functions codebase (separate package.json/tsconfig)
    calls Firebase Auth's `createUserWithEmailAndPassword`. Firebase hashes
    and stores the password — this codebase never sees or persists a
    plaintext password.
-2. The Cloud Function `onUserCreate` (`functions/src/onUserCreate.ts`)
-   fires automatically on Auth user creation. It allocates a unique public
-   `userId` (format `GH-#####`) inside a Firestore transaction against the
-   `userIds/{userId}` reservation collection, retrying on collision, and
-   writes `users/{uid}`.
-3. Client-side `lib/users/createUserProfile.server.ts` contains the same
-   logic for use from a Route Handler / Server Action if you'd rather do
-   this synchronously at sign-up time instead of via the trigger — pick one
-   path, don't run both, to avoid a duplicate-user-doc race.
+2. The client calls `ensureUserProfile()` after Auth sign-up and when the
+   owner opens their profile. A Firestore transaction reserves a unique
+   `GH-#####` code and writes the private user document plus a safe public
+   profile projection. Security Rules validate the complete transaction.
+3. The optional Cloud Function `onUserCreate` uses the same reservation
+   contract and is safe to deploy alongside client provisioning.
 4. `useAuth()` (`hooks/useAuth.ts`) exposes live auth state to client
    components. `ProtectedRoute` redirects logged-out users away from
    authenticated pages (UX only — real enforcement is Security Rules).
 
 ## Message flow
-1. `createOrGetDirectConversation(uidA, uidB)` deduplicates 1-to-1 chats via
-   a deterministic `directKey` (`sorted(uidA,uidB).join('_')`), and creates
-   the conversation doc, both `members/{uid}` docs, and both inbox preview
-   docs (`users/{uid}/conversations/{conversationId}`) atomically.
+1. `createOrGetDirectConversation(uidA, uidB, userIdB)` looks for an
+   existing chat in the caller's private inbox. New chats use the stable
+   direct key as their document ID to deduplicate concurrent starts. Rules
+   validate the target's contact-code reservation and atomically create the
+   conversation, both member docs, and both inbox previews.
 2. `sendMessage()` writes a new document to
    `conversations/{id}/messages/{messageId}` and, in the same transaction,
    updates the conversation's `lastMessage`/`lastMessageAt` and each

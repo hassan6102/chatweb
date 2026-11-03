@@ -3,54 +3,37 @@
 import { useState } from "react";
 import { Icon } from "@/components/common/Icon";
 import { ReplyQuote } from "./ReplyPreview";
-import { ReactionPicker } from "./ReactionPicker";
-import { ReactionsRow } from "./ReactionsRow";
 import { MessageActionsMenu, type MessageAction } from "./MessageActionsMenu";
 import { ImageMessage, FileMessage } from "./MediaMessage";
 import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
 import { formatClockTime } from "@/lib/mock/timestamp";
-import type { ReactionEmoji } from "@/types/ui";
-import { auth } from "@/firebase/client";
 
 export function MessageBubble({
   message,
   isOwn,
   replyToMessage,
-  isPinned,
   selectionMode,
   selected,
   onToggleSelect,
   onReply,
   onEdit,
-  onDeleteForMe,
   onDeleteForEveryone,
   onCopy,
-  onForward,
-  onTogglePin,
-  onReact,
   onOpenImage,
 }: {
   message: any;
   isOwn: boolean;
   replyToMessage: any | null;
-  isPinned: boolean;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
   onReply: () => void;
   onEdit: () => void;
-  onDeleteForMe: () => void;
   onDeleteForEveryone: () => void;
   onCopy: () => void;
-  onForward: () => void;
-  onTogglePin: () => void;
-  onReact: (emoji: ReactionEmoji | null) => void;
   onOpenImage: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  
-  const currentUid = auth.currentUser?.uid || "";
 
   // السطر ده بيعالج مشكلة الوقت بيقراه مهما كانت صيغته
   const msgTime = typeof message.createdAt === "number" 
@@ -68,8 +51,6 @@ export function MessageBubble({
     );
   }
 
-  const myReaction = message.reactions?.[currentUid];
-
   const actions: MessageAction[] = [
     { key: "reply", icon: "reply", label: "Reply", onSelect: onReply },
     ...(isOwn && message.type === "text"
@@ -78,16 +59,13 @@ export function MessageBubble({
     ...(message.type === "text"
       ? [{ key: "copy", icon: "copy" as const, label: "Copy", onSelect: onCopy }]
       : []),
-    { key: "forward", icon: "forward", label: "Forward", onSelect: onForward },
-    { key: "pin", icon: "pin", label: isPinned ? "Unpin" : "Pin", onSelect: onTogglePin },
     { key: "select", icon: "checkCheck", label: "Select", onSelect: onToggleSelect },
-    { key: "deleteMe", icon: "trash", label: "Delete for me", danger: true, onSelect: onDeleteForMe },
     ...(isOwn
       ? [
           {
             key: "deleteAll",
             icon: "trash" as const,
-            label: "Delete for everyone",
+            label: "Delete message",
             danger: true,
             onSelect: onDeleteForEveryone,
           },
@@ -129,7 +107,10 @@ export function MessageBubble({
             <ImageMessage metadata={message.metadata} onOpen={onOpenImage} />
           )}
           {message.type === "audio" && (
-            <VoiceMessagePlayer durationSeconds={message.metadata?.durationSeconds ?? 0} />
+            <VoiceMessagePlayer
+              durationSeconds={message.metadata?.durationSeconds ?? 0}
+              storagePath={message.metadata?.storagePath}
+            />
           )}
           {message.type === "file" && (
             <FileMessage metadata={message.metadata} text={message.text} />
@@ -140,7 +121,6 @@ export function MessageBubble({
               isOwn ? "text-bubble-out-ink/75" : "text-ink-faint"
             } ${message.type === "text" ? "" : "px-1.5"}`}
           >
-            {isPinned && <Icon name="pin" size={10} />}
             {message.editedAt && <span>edited</span>}
             {/* قراءة الوقت المظبوط هنا */}
             {formatClockTime(msgTime)}
@@ -156,13 +136,6 @@ export function MessageBubble({
           >
             <div className="relative flex items-center gap-0.5">
               <button
-                aria-label="React"
-                onClick={() => setPickerOpen((v) => !v)}
-                className="focus-ring flex h-7 w-7 items-center justify-center rounded-full bg-surface text-ink-muted shadow-sm hover:text-ink"
-              >
-                <Icon name="smile" size={14} />
-              </button>
-              <button
                 aria-label="More actions"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((v) => !v)}
@@ -170,22 +143,6 @@ export function MessageBubble({
               >
                 <Icon name="more" size={14} />
               </button>
-              
-              {pickerOpen && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setPickerOpen(false)} />
-                  <div className="relative">
-                    <ReactionPicker
-                      current={myReaction}
-                      align={isOwn ? "end" : "start"}
-                      onPick={(emoji) => {
-                        onReact(myReaction === emoji ? null : emoji);
-                        setPickerOpen(false);
-                      }}
-                    />
-                  </div>
-                </>
-              )}
               {menuOpen && (
                 <MessageActionsMenu actions={actions} onClose={() => setMenuOpen(false)} align={isOwn ? "end" : "start"} />
               )}
@@ -193,9 +150,6 @@ export function MessageBubble({
           </div>
         )}
 
-        {message.reactions && Object.keys(message.reactions).length > 0 && (
-          <ReactionsRow reactions={message.reactions} currentUid={currentUid} align={isOwn ? "end" : "start"} />
-        )}
       </div>
     </div>
   );

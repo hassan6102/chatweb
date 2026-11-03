@@ -14,6 +14,13 @@ export function TextField({
   const [visible, setVisible] = useState(false);
   const isPassword = type === "password";
   const resolvedType = isPassword ? (visible ? "text" : "password") : type;
+  const inputClasses = [
+    "focus-ring w-full rounded-lg border bg-surface-sunken px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint",
+    error ? "border-danger/60 focus-visible:outline-danger" : "border-border",
+    isPassword ? "pr-10" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className={className}>
@@ -26,7 +33,7 @@ export function TextField({
           type={resolvedType}
           aria-invalid={!!error}
           aria-describedby={error ? `${id}-error` : undefined}
-          className="focus-ring w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint"
+          className={inputClasses}
           {...props}
         />
         {isPassword && (

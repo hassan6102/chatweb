@@ -1,113 +1,56 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConversationItem } from "./ConversationItem";
 import { ConversationListSkeleton } from "@/components/common/Skeleton";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Icon } from "@/components/common/Icon";
-import { db, auth } from "@/firebase/client";
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { Toast } from "@/components/common/Toast";
+import { useConversations } from "@/hooks/useConversations";
 
 export function ConversationList({ activeConversationId }: { activeConversationId?: string }) {
   const router = useRouter();
-  const [conversations, setConversations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { conversations, loading, error, togglePin, toggleMute, toggleArchive, deleteLocally } = useConversations();
   const [queryText, setQueryText] = useState("");
   const [showArchived, setShowArchived] = useState(false);
-
-  // جلب المحادثات الحقيقية التي يشارك فيها المستخدم الحالي من مجموعة conversations العامة
-  useEffect(() => {
-    const currentUserId = auth.currentUser?.uid;
-    if (!currentUserId) {
-      setLoading(false);
-      return;
-    }
-
-    const q = query(collection(db, "conversations"), where("participants", "array-contains", currentUserId));
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      try {
-        const convPromises = snapshot.docs.map(async (convDoc) => {
-          const data = convDoc.data();
-          const participants = data.participants || [];
-          const otherUid = participants.find((uid: string) => uid !== currentUserId);
-
-          let otherUser = null;
-          if (otherUid) {
-            const userSnap = await getDoc(doc(db, "users", otherUid));
-            if (userSnap.exists()) {
-              otherUser = { uid: userSnap.id, ...userSnap.data() };
-            }
-          }
-
-          return {
-            conversationId: convDoc.id,
-            ...data,
-            otherUser,
-          };
-        });
-
-        const resolvedConversations = await Promise.all(convPromises);
-        
-        // ترتيب المحادثات حسب تاريخ التحديث (الأحدث أولاً)
-        resolvedConversations.sort((a: any, b: any) => {
-          const timeA = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : 0;
-          const timeB = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : 0;
-          return timeB - timeA;
-        });
-
-        setConversations(resolvedConversations);
-      } catch (error) {
-        console.error("Error fetching conversations list:", error);
-      } finally {
-        setLoading(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // دوال التحكم في المحادثات (تثبيت، كاتم، أرشيف، حذف)
-  async function handleTogglePin(convId: string, currentVal: boolean) {
-    try {
-      await updateDoc(doc(db, "conversations", convId), { pinned: !currentVal });
-    } catch (e) { console.error(e); }
-  }
-
-  async function handleToggleMute(convId: string, currentVal: boolean) {
-    try {
-      await updateDoc(doc(db, "conversations", convId), { muted: !currentVal });
-    } catch (e) { console.error(e); }
-  }
-
-  async function handleToggleArchive(convId: string, currentVal: boolean) {
-    try {
-      await updateDoc(doc(db, "conversations", convId), { archived: !currentVal });
-    } catch (e) { console.error(e); }
-  }
-
-  async function handleDelete(convId: string) {
-    try {
-      await deleteDoc(doc(db, "conversations", convId));
-    } catch (e) { console.error(e); }
-  }
+  const [toast, setToast] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
-    const base = conversations.filter((c) => !!c.archived === showArchived);
+    const base = conversations.filter((conversation) => conversation.archived === showArchived);
     if (!queryText.trim()) return base;
-    const q = queryText.trim().toLowerCase();
-    return base.filter((c) => {
-      const user = c.otherUser;
-      const name = (c.customName ?? user?.displayName ?? "").toLowerCase();
-      const userId = (user?.userId ?? "").toLowerCase();
-      return name.includes(q) || userId.includes(q);
-    });
+    const query = queryText.trim().toLowerCase();
+    return base.filter((conversation) => conversation.customName?.toLowerCase().includes(query));
   }, [conversations, queryText, showArchived]);
 
-  const pinned = filtered.filter((c) => c.pinned);
-  const rest = filtered.filter((c) => !c.pinned);
-  const archivedCount = conversations.filter((c) => c.archived).length;
+  const pinned = filtered.filter((conversation) => conversation.pinned);
+  const rest = filtered.filter((conversation) => !conversation.pinned);
+  const archivedCount = conversations.filter((conversation) => conversation.archived).length;
+
+  async function runAction(action: () => Promise<void>) {
+    try {
+      await action();
+    } catch (actionError) {
+      console.error("Could not update conversation:", actionError);
+      setToast("Could not update this conversation. Please try again.");
+    }
+  }
+
+  function renderConversation(conversation: (typeof conversations)[number]) {
+    return (
+      <ConversationItem
+        key={conversation.conversationId}
+        conversation={conversation}
+        otherUser={null}
+        active={conversation.conversationId === activeConversationId}
+        onOpen={() => router.push(`/chat/${conversation.conversationId}`)}
+        onTogglePin={() => void runAction(() => togglePin(conversation.conversationId))}
+        onToggleMute={() => void runAction(() => toggleMute(conversation.conversationId))}
+        onToggleArchive={() => void runAction(() => toggleArchive(conversation.conversationId))}
+        onDelete={() => void runAction(() => deleteLocally(conversation.conversationId))}
+      />
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -121,10 +64,10 @@ export function ConversationList({ activeConversationId }: { activeConversationI
           <input
             type="search"
             value={queryText}
-            onChange={(e) => setQueryText(e.target.value)}
-            placeholder="Search name or User ID"
+            onChange={(event) => setQueryText(event.target.value)}
+            placeholder="Search saved contact names"
             aria-label="Search conversations"
-            className="focus-ring w-full rounded-full border border-border bg-surface-sunken py-2 pl-9 pr-3 text-sm text-ink placeholder:text-ink-faint"
+            className="focus-ring w-full rounded-xl border border-border bg-surface-sunken py-2.5 pl-9 pr-3 text-sm text-ink placeholder:text-ink-faint"
           />
         </div>
       </div>
@@ -148,62 +91,43 @@ export function ConversationList({ activeConversationId }: { activeConversationI
         </button>
       )}
 
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {loading ? (
           <ConversationListSkeleton />
+        ) : error ? (
+          <p role="alert" className="mx-3 mt-4 rounded-lg border border-danger/20 bg-danger/10 p-3 text-sm text-danger">
+            Your conversations could not be loaded.
+          </p>
         ) : filtered.length === 0 ? (
           <EmptyState
             icon="search"
-            title={queryText ? "No matches" : showArchived ? "No archived chats" : "No conversations yet"}
+            title={queryText ? "No saved names match" : showArchived ? "No archived chats" : "No conversations yet"}
             description={
               queryText
-                ? "Try a different name or User ID."
+                ? "Search by a contact name you have saved."
                 : showArchived
-                ? "Chats you archive will show up here."
-                : "Start a new chat by entering someone's User ID."
+                  ? "Chats you archive will show up here."
+                  : "Start a new chat by entering someone's User ID."
             }
           />
         ) : (
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-1">
             {pinned.length > 0 && (
-              <p className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
+              <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
                 Pinned
               </p>
             )}
-            {pinned.map((c) => (
-              <ConversationItem
-                key={c.conversationId}
-                conversation={c}
-                otherUser={c.otherUser}
-                active={c.conversationId === activeConversationId}
-                onOpen={() => router.push(`/chat/${c.conversationId}`)}
-                onTogglePin={() => handleTogglePin(c.conversationId, c.pinned)}
-                onToggleMute={() => handleToggleMute(c.conversationId, c.muted)}
-                onToggleArchive={() => handleToggleArchive(c.conversationId, c.archived)}
-                onDelete={() => handleDelete(c.conversationId)}
-              />
-            ))}
+            {pinned.map(renderConversation)}
             {pinned.length > 0 && rest.length > 0 && (
-              <p className="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-ink-faint">
+              <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
                 All chats
               </p>
             )}
-            {rest.map((c) => (
-              <ConversationItem
-                key={c.conversationId}
-                conversation={c}
-                otherUser={c.otherUser}
-                active={c.conversationId === activeConversationId}
-                onOpen={() => router.push(`/chat/${c.conversationId}`)}
-                onTogglePin={() => handleTogglePin(c.conversationId, c.pinned)}
-                onToggleMute={() => handleToggleMute(c.conversationId, c.muted)}
-                onToggleArchive={() => handleToggleArchive(c.conversationId, c.archived)}
-                onDelete={() => handleDelete(c.conversationId)}
-              />
-            ))}
+            {rest.map(renderConversation)}
           </div>
         )}
       </div>
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

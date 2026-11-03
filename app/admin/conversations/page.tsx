@@ -46,7 +46,7 @@ export default function AdminConversationsPage() {
         const qLower = query.toLowerCase();
         allDocs = allDocs.filter(c => 
           c.id.toLowerCase().includes(qLower) || 
-          (c.participants && c.participants.some((p: string) => p.toLowerCase().includes(qLower)))
+          (c.memberUids && c.memberUids.some((uid: string) => uid.toLowerCase().includes(qLower)))
         );
       }
 
@@ -75,9 +75,9 @@ export default function AdminConversationsPage() {
 
         return {
           conversationId: c.id,
-          participantUserIds: c.participants || [],
-          participantUids: c.participants || [],
-          type: "direct",
+          participantUserIds: c.memberUids || [],
+          participantUids: c.memberUids || [],
+          type: c.type === "group" ? "group" : "direct",
           messageCount: msgCount,
           reportCount: 0,
           lastMessage: c.lastMessage || "",

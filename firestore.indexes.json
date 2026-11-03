@@ -17,12 +17,24 @@
       ]
     },
     {
-      "collectionGroup": "conversations",
-      "queryScope": "COLLECTION_GROUP",
+      "collectionGroup": "reports",
+      "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "createdAt",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    }
+  ]
 }

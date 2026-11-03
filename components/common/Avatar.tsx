@@ -40,14 +40,16 @@ export function Avatar({
   status,
   showStatus = false,
 }: {
-  name: string | null;
-  userId: string;
+  name?: string | null;
+  userId?: string | null;
   photoURL?: string | null;
   size?: keyof typeof SIZES;
   status?: UserStatus;
   showStatus?: boolean;
 }) {
   const dimension = SIZES[size];
+  const fallbackId = userId || name?.trim() || "user";
+  const accessibleName = name?.trim() || fallbackId;
 
   return (
     <span className="relative inline-flex shrink-0">
@@ -55,15 +57,15 @@ export function Avatar({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={photoURL}
-          alt={name ?? userId}
+          alt={accessibleName}
           className={`${dimension} rounded-full object-cover`}
         />
       ) : (
         <span
-          className={`${dimension} ${colorFor(userId)} flex items-center justify-center rounded-full font-medium text-white`}
+          className={`${dimension} ${colorFor(fallbackId)} flex items-center justify-center rounded-full font-medium text-white`}
           aria-hidden="true"
         >
-          {initialsFor(name, userId)}
+          {initialsFor(name ?? null, fallbackId)}
         </span>
       )}
       {showStatus && status === "active" && (

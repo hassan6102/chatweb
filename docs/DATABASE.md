@@ -4,9 +4,10 @@
 
 ```
 users/{uid}
+publicProfiles/{uid}                         -- public-safe profile projection
 users/{uid}/contacts/{contactUid}
 users/{uid}/conversations/{conversationId}     -- inbox preview, private
-userIds/{userId}                                -- uniqueness reservation, not user-facing
+userIds/{userId}                                -- get-only contact-code reservation
 
 conversations/{conversationId}
 conversations/{conversationId}/members/{uid}
@@ -20,7 +21,7 @@ adminLogs/{logId}
 | field | notes |
 |---|---|
 | uid | Firebase Auth uid, doc id |
-| userId | Public, stable, searchable. Format `GH-#####`. Server-generated only. |
+| userId | Public, stable, searchable. Format `GH-#####`. Allocated with a Firestore reservation transaction. |
 | email | Auth email |
 | displayName | nullable |
 | phoneNumber | **PRIVATE** — never exposed to other normal users (see SECURITY.md) |
@@ -30,14 +31,20 @@ adminLogs/{logId}
 | isDisabled | admin-controlled kill switch |
 
 ### `userIds/{userId}`
-Reservation-only document (`{ uid, createdAt }`) used inside a transaction
-to guarantee `userId` uniqueness without needing a Firestore query-then-write
-race. Not read by normal app UI.
+Reservation document (`{ uid, createdAt }`) used inside a transaction to
+guarantee `userId` uniqueness without a query-then-write race. Signed-in
+clients may get a reservation by exact code but cannot list the collection.
+
+### `publicProfiles/{uid}`
+Public-safe projection containing only `{ uid, userId, displayName }`.
+Signed-in users may get one profile by uid but cannot list profiles. Contact
+lookup first resolves an exact `userIds/{userId}` reservation, then reads this
+projection. Email and phone number remain private in `users/{uid}`.
 
 ### `conversations/{conversationId}` — see `types/conversation.ts`
 `type: "direct" | "group"` (only `"direct"` is created in this phase),
-`directKey` (sorted `uidA_uidB`, used to prevent duplicate 1-to-1 chats,
-`null` for future group chats), `lastMessage`, `lastMessageAt`, `createdBy`.
+`directKey` (sorted `uidA_uidB`, used to prevent duplicate 1-to-1 chats),
+`lastMessageId`, `lastMessage`, `lastMessageAt`, `createdBy`.
 
 ### `conversations/{conversationId}/members/{uid}`
 One doc per participant: `{ uid, joinedAt, role, isRemoved }`. A direct
@@ -53,8 +60,12 @@ conversation document. See `types/message.ts` for the full field list
 
 ### `users/{uid}/conversations/{conversationId}` — inbox preview
 Denormalized copy for a fast chat list without a join: `otherUserId`,
-`lastMessage`, `lastMessageAt`, `unreadCount`, `pinned`, `muted`,
-`archived`, and `customName`.
+`lastMessageId`, `lastMessage`, `lastMessageAt`, `unreadCount`, `pinned`,
+`muted`, `archived`, and `customName`.
+
+The `lastMessageId` field links inbox updates to a message committed in the
+same transaction, so Rules can authorize updating the recipient's unread
+preview without allowing changes to their private conversation settings.
 
 `customName` is **private per-user** — e.g. user A can label `GH-92841` as
 "أحمد الشغل" while user B labels the same account "صاحبي". This lives only

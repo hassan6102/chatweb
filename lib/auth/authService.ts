@@ -8,39 +8,33 @@ import {
   EmailAuthProvider,
   type User,
 } from "firebase/auth";
-import { auth, db } from "@/firebase/client"; 
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth } from "@/firebase/client";
+import { stopPresence } from "@/lib/realtime/presence";
+import { ensureUserProfile } from "@/lib/users/ensureUserProfile";
 
-export async function registerWithEmail(email: string, password: string, phoneNumber: string = ""): Promise<User> {
-  // 1. إنشاء الحساب في المصادقة
+export async function registerWithEmail(
+  email: string,
+  password: string,
+  phoneNumber: string = ""
+): Promise<User> {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
-  const uid = credential.user.uid;
-
-  // 2. توليد معرف مستخدم فريد عشوائياً (مثال: USER-45912)
-  const generatedUserId = "USER-" + Math.floor(10000 + Math.random() * 90000);
-  
-  // 3. حفظ كافة البيانات الأساسية في قاعدة البيانات مباشرة
-  await setDoc(doc(db, "users", uid), {
-    uid: uid,
-    userId: generatedUserId,
-    email: email,
-    phoneNumber: phoneNumber,
-    createdAt: serverTimestamp(),
-    accountStatus: "active",
-    isOnline: true,
-    conversationCount: 0,
-    messageCount: 0
-  });
-
+  await ensureUserProfile(credential.user, phoneNumber);
   return credential.user;
 }
 
 export async function loginWithEmail(email: string, password: string): Promise<User> {
   const credential = await signInWithEmailAndPassword(auth, email, password);
+  await ensureUserProfile(credential.user, undefined, true);
   return credential.user;
 }
 
 export async function logout(): Promise<void> {
+  const user = auth.currentUser;
+  if (user) {
+    void stopPresence(user.uid).catch((error: unknown) => {
+      console.error("Could not update presence during sign-out:", error);
+    });
+  }
   await firebaseSignOut(auth);
 }
 

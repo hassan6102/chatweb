@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ChatHeader } from "@/components/chat/ChatHeader";
 import { MessageList } from "@/components/chat/MessageList";
 import { MessageInput } from "@/components/chat/MessageInput";
+import { MediaViewer } from "@/components/chat/MediaViewer";
 import { RenameContact } from "@/components/users/RenameContact";
 import { Toast } from "@/components/common/Toast";
 import { EmptyState } from "@/components/common/EmptyState";
-import { useMessages } from "@/hooks/useMessages";
-import { db, auth } from "@/firebase/client";
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot } from "firebase/firestore";
+import { useMessages, type FirestoreMessage } from "@/hooks/useMessages";
+import { db, auth, storage } from "@/firebase/client";
+import { deleteObject, ref as storageRef, uploadBytes } from "firebase/storage";
+import { doc, getDoc, getDocs, collection, updateDoc, onSnapshot } from "firebase/firestore";
+import { setTyping, subscribeToTyping } from "@/lib/realtime/presence";
+import { markConversationAsRead, markMessageAsRead } from "@/lib/messages/messageService";
 
 export default function ChatPage() {
   const params = useParams<{ conversationId: string }>();
@@ -20,6 +25,7 @@ export default function ChatPage() {
   const [conversation, setConversation] = useState<any>(null);
   const [otherUser, setOtherUser] = useState<any>(null);
   const [loadingConv, setLoadingConv] = useState(true);
+  const [myPreview, setMyPreview] = useState<any>(null);
 
   // حالات خاصة بالمستخدم الحالي وقائمة المحظورين
   const [myBlockedUsers, setMyBlockedUsers] = useState<any[]>([]);
@@ -28,12 +34,13 @@ export default function ChatPage() {
   const {
     messages,
     loading: messagesLoading,
-    pinnedIds,
+    error: messagesError,
+    hasMore: hasMoreMessages,
+    loadingOlder: loadingOlderMessages,
+    loadOlderMessages,
     sendMessage,
     editMessage,
     deleteMessage,
-    react,
-    togglePinMessage,
   } = useMessages(conversationId);
 
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
@@ -41,6 +48,9 @@ export default function ChatPage() {
   const [renaming, setRenaming] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [otherTyping, setOtherTyping] = useState(false);
+  const readAttemptedRef = useRef(new Set<string>());
+  const [imageMessage, setImageMessage] = useState<FirestoreMessage | null>(null);
+  const closeMediaViewer = useCallback(() => setImageMessage(null), []);
 
   // 1. جلب معرف المستخدم الحالي
   useEffect(() => {
@@ -62,36 +72,155 @@ export default function ChatPage() {
   }, [myUid]);
 
   useEffect(() => {
+    if (!myUid || !conversationId) return;
+    setMyPreview(null);
+    return onSnapshot(
+      doc(db, "users", myUid, "conversations", conversationId),
+      (snapshot) => setMyPreview(snapshot.exists() ? snapshot.data() : null),
+      (error) => {
+        console.error("Error fetching inbox preview:", error);
+        setToast("Conversation settings could not be loaded.");
+      }
+    );
+  }, [conversationId, myUid]);
+
+  useEffect(() => {
+    if (!myUid || !conversationId) return;
+    const unsubscribe = subscribeToTyping(conversationId, (typingUids) => {
+      setOtherTyping(typingUids.some((uid) => uid !== myUid));
+    });
+    return () => {
+      unsubscribe();
+      void setTyping(conversationId, myUid, false).catch((error) => {
+        console.error("Failed to clear typing status:", error);
+      });
+    };
+  }, [conversationId, myUid]);
+
+  useEffect(() => {
+    readAttemptedRef.current.clear();
+    if (!myUid || !conversationId) return;
+    void markConversationAsRead({ conversationId, uid: myUid }).catch((error) => {
+      console.error("Failed to mark conversation as read:", error);
+      setToast("Read status could not be updated.");
+    });
+  }, [conversationId, myUid]);
+
+  useEffect(() => {
+    if (!myUid || !conversationId) return;
+    const unreadMessages = messages.filter(
+      (message) =>
+        message.senderId !== myUid &&
+        !message.readBy.includes(myUid) &&
+        !readAttemptedRef.current.has(message.messageId)
+    );
+    if (unreadMessages.length === 0) return;
+
+    for (const message of unreadMessages) readAttemptedRef.current.add(message.messageId);
+    void Promise.all(
+      unreadMessages.map((message) =>
+        markMessageAsRead({ conversationId, messageId: message.messageId, uid: myUid })
+      )
+    ).catch((error) => {
+      console.error("Failed to mark messages as read:", error);
+      setToast("Message read receipts could not be updated.");
+    });
+  }, [conversationId, messages, myUid]);
+
+  useEffect(() => {
+    setImageMessage(null);
+    let active = true;
     async function fetchConversationData() {
       if (!conversationId) return;
+      setLoadingConv(true);
+      setConversation(null);
+      setOtherUser(null);
       try {
         const convRef = doc(db, "conversations", conversationId);
         const convSnap = await getDoc(convRef);
 
         if (convSnap.exists()) {
           const convData = convSnap.data();
+          if (!active) return;
           setConversation(convData);
 
           const currentUserId = auth.currentUser?.uid;
-          const participants = convData.participants || [];
-          const otherUid = participants.find((uid: string) => uid !== currentUserId);
-
-          if (otherUid) {
-            const userSnap = await getDoc(doc(db, "users", otherUid));
-            if (userSnap.exists()) {
-              setOtherUser({ uid: userSnap.id, ...userSnap.data() });
-            }
+          const members = await getDocs(collection(db, "conversations", conversationId, "members"));
+          if (!active) return;
+          const otherUid = members.docs.map((member) => member.id).find((uid) => uid !== currentUserId);
+          if (!otherUid) {
+            setOtherUser(null);
+            return;
           }
+
+          const publicProfile = await getDoc(doc(db, "publicProfiles", otherUid));
+          if (!active) return;
+          const publicData = publicProfile.data();
+          setOtherUser({
+            uid: otherUid,
+            displayName: typeof publicData?.displayName === "string" ? publicData.displayName : null,
+            userId: typeof publicData?.userId === "string" ? publicData.userId : null,
+            status: "offline",
+          });
+        } else {
+          if (!active) return;
+          setConversation(null);
+          setOtherUser(null);
         }
       } catch (error) {
+        if (!active) return;
         console.error("Error fetching conversation details:", error);
+        setConversation(null);
+        setOtherUser(null);
       } finally {
-        setLoadingConv(false);
+        if (active) setLoadingConv(false);
       }
     }
 
-    fetchConversationData();
+    void fetchConversationData();
+    return () => {
+      active = false;
+    };
   }, [conversationId]);
+
+  async function handleSendAttachment(file: File, caption: string, replyTo: string | null) {
+    if (!myUid) throw new Error("You must be signed in to send an attachment.");
+    if (file.size >= 25 * 1024 * 1024) {
+      throw new Error("Attachments must be smaller than 25 MB.");
+    }
+
+    const type = file.type.startsWith("image/")
+      ? "image"
+      : file.type.startsWith("audio/")
+        ? "audio"
+        : "file";
+    const path = `conversations/${conversationId}/media/${crypto.randomUUID()}`;
+    const fileRef = storageRef(storage, path);
+    await uploadBytes(fileRef, file, {
+      contentType: file.type || "application/octet-stream",
+    });
+
+    try {
+      await sendMessage({
+        type,
+        text: caption || null,
+        replyTo,
+        metadata: {
+          storagePath: path,
+          fileName: file.name,
+          size: file.size,
+          mimeType: file.type || "application/octet-stream",
+        },
+      });
+    } catch (error) {
+      try {
+        await deleteObject(fileRef);
+      } catch (cleanupError) {
+        console.error("Could not clean up an unsent attachment:", cleanupError);
+      }
+      throw error;
+    }
+  }
 
   if (loadingConv) {
     return <div className="flex h-full items-center justify-center text-sm text-ink-muted">جاري تحميل المحادثة...</div>;
@@ -101,81 +230,51 @@ export default function ChatPage() {
     return <EmptyState icon="search" title="Conversation not found" description="It may have been deleted, or the link is out of date." />;
   }
 
-  const customName = myUid && conversation.customNames ? conversation.customNames[myUid] : null;
+  const customName = myPreview?.customName ?? null;
   const displayName = customName || otherUser.displayName || otherUser.userId || "مستخدم";
-  const isMuted = myUid ? (conversation.mutedBy || []).includes(myUid) : false;
+  const isMuted = myPreview?.muted === true;
   
   // التحقق مما إذا كان هذا الشخص في قائمة الحظر الخاصة بك
   const isBlockedByMe = myBlockedUsers.some((u: any) => u.uid === otherUser.uid);
 
-  function handleTypingChange(isTyping: boolean) {}
+  function handleTypingChange(isTyping: boolean) {
+    if (!myUid) return;
+    void setTyping(conversationId, myUid, isTyping).catch((error) => {
+      console.error("Failed to update typing status:", error);
+    });
+  }
 
   async function handleToggleMute() {
     if (!conversationId || !myUid) return;
     try {
-      const convRef = doc(db, "conversations", conversationId);
-      await updateDoc(convRef, {
-        mutedBy: isMuted ? arrayRemove(myUid) : arrayUnion(myUid)
+      await updateDoc(doc(db, "users", myUid, "conversations", conversationId), {
+        muted: !isMuted,
       });
-      setConversation((prev: any) => ({
-        ...prev,
-        mutedBy: isMuted 
-          ? (prev.mutedBy || []).filter((id: string) => id !== myUid)
-          : [...(prev.mutedBy || []), myUid]
-      }));
     } catch (error) {
-      console.error("Error toggling mute", error);
+      console.error("Error toggling mute:", error);
+      setToast("Could not update conversation settings.");
     }
   }
 
   async function handleRename(newName: string | null) {
     if (!conversationId || !myUid) return;
     try {
-      const convRef = doc(db, "conversations", conversationId);
-      await updateDoc(convRef, {
-        [`customNames.${myUid}`]: newName
+      await updateDoc(doc(db, "users", myUid, "conversations", conversationId), {
+        customName: newName,
       });
-      setConversation((prev: any) => ({
-        ...prev,
-        customNames: { ...(prev.customNames || {}), [myUid]: newName }
-      }));
       setRenaming(false);
     } catch (error) {
-      console.error("Error renaming", error);
+      console.error("Error renaming contact:", error);
+      setToast("Could not rename this contact.");
     }
   }
 
-  // دالة الحظر المباشرة من الشات
   async function handleBlock() {
-    if (!myUid || !otherUser) return;
-    try {
-      await updateDoc(doc(db, "users", myUid), {
-        blockedUsers: arrayUnion({
-          uid: otherUser.uid,
-          userId: otherUser.userId,
-          displayName: otherUser.displayName || "مستخدم"
-        })
-      });
-      setToast("تم الحظر بنجاح");
-    } catch (error) {
-      console.error(error);
-    }
+    setToast("Blocking is not available yet.");
   }
 
-  // دالة فك الحظر
   async function handleUnblock() {
-    if (!myUid || !otherUser) return;
-    try {
-      const userToRemove = myBlockedUsers.find(u => u.uid === otherUser.uid);
-      if (userToRemove) {
-        await updateDoc(doc(db, "users", myUid), {
-          blockedUsers: arrayRemove(userToRemove)
-        });
-        setToast("تم إلغاء الحظر");
-      }
-    } catch (error) {
-      console.error(error);
-    }
+    setToast("Blocking is not available yet.");
   }
 
   return (
@@ -188,7 +287,10 @@ export default function ChatPage() {
         onToggleMute={handleToggleMute}
         onRename={() => setRenaming(true)}
         onSearchInChat={() => router.push(`/search-messages?conversation=${conversationId}`)}
-        onOpenProfile={() => router.push(`/u/${otherUser.userId}`)}
+        onOpenProfile={() => {
+          if (otherUser.userId) router.push(`/u/${otherUser.userId}`);
+          else setToast("This contact has not set up a public profile yet.");
+        }}
         
         // تمرير دوال الحظر للشريط العلوي
         onBlock={handleBlock}
@@ -197,24 +299,48 @@ export default function ChatPage() {
       />
 
       <MessageList
-        messages={messages as any}
+        messages={messages}
         loading={messagesLoading}
-        pinnedIds={pinnedIds}
+        error={messagesError}
+        hasMore={hasMoreMessages}
+        loadingOlder={loadingOlderMessages}
+        onLoadOlder={() => void loadOlderMessages()}
+        currentUserId={myUid}
         otherUserTyping={otherTyping}
         onReply={(m: any) => { setEditingMessage(null); setReplyingTo(m); }}
         onEdit={(m: any) => { setReplyingTo(null); setEditingMessage(m); }}
-        onDeleteForMe={(id: string) => deleteMessage(id)}
-        onDeleteForEveryone={(id: string) => deleteMessage(id)}
-        onDeleteMany={(ids: string[]) => ids.forEach((id) => deleteMessage(id))}
-        onCopy={(m: any) => {
-          if (m.text) navigator.clipboard?.writeText(m.text).catch(() => {});
-          setToast("Copied to clipboard");
+        onDeleteForEveryone={(id: string) => {
+          void deleteMessage(id).catch((error) => {
+            console.error("Could not delete message:", error);
+            setToast("Could not delete this message.");
+          });
         }}
-        onForward={() => {}}
-        onForwardMany={() => {}}
-        onTogglePinMessage={togglePinMessage}
-        onReact={react}
-        onOpenImage={() => {}}
+        onDeleteMany={(ids: string[]) => {
+          if (ids.some((id) => messages.find((message) => message.messageId === id)?.senderId !== myUid)) {
+            setToast("You can only delete your own messages.");
+            return;
+          }
+          void Promise.all(ids.map((id) => deleteMessage(id))).catch((error) => {
+            console.error("Could not delete selected messages:", error);
+            setToast("Could not delete the selected messages.");
+          });
+        }}
+        onCopy={async (message: any) => {
+          if (!message.text || !navigator.clipboard) {
+            setToast("Copy is not available in this browser.");
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(message.text);
+            setToast("Copied to clipboard");
+          } catch (error) {
+            console.error("Could not copy message:", error);
+            setToast("Could not copy this message.");
+          }
+        }}
+        onOpenImage={(message: FirestoreMessage) => {
+          if (message.type === "image") setImageMessage(message);
+        }}
       />
 
       {/* إخفاء مكان الكتابة إذا كان المستخدم محظوراً وعرض رسالة الحظر */}
@@ -236,12 +362,16 @@ export default function ChatPage() {
           onCancelReply={() => setReplyingTo(null)}
           editingMessage={editingMessage}
           onCancelEdit={() => setEditingMessage(null)}
-          onSend={(text: string) => {
-            sendMessage({ type: "text", text, replyTo: replyingTo?.messageId ?? null });
+          onSend={async (text: string) => {
+            await sendMessage({ type: "text", text, replyTo: replyingTo?.messageId ?? null });
             setReplyingTo(null);
           }}
-          onSaveEdit={(text: string) => {
-            if (editingMessage) editMessage(editingMessage.messageId, text);
+          onSendAttachment={async (file, caption, replyTo) => {
+            await handleSendAttachment(file, caption, replyTo);
+            setReplyingTo(null);
+          }}
+          onSaveEdit={async (text: string) => {
+            if (editingMessage) await editMessage(editingMessage.messageId, text);
             setEditingMessage(null);
           }}
           onTypingChange={handleTypingChange}
@@ -250,7 +380,7 @@ export default function ChatPage() {
 
       {renaming && (
         <RenameContact
-          userId={otherUser.userId}
+          userId={otherUser.userId ?? "contact"}
           currentName={customName}
           onSave={handleRename}
           onClose={() => setRenaming(false)}
@@ -258,6 +388,7 @@ export default function ChatPage() {
       )}
 
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+      {imageMessage && <MediaViewer message={imageMessage} onClose={closeMediaViewer} />}
     </div>
   );
 }

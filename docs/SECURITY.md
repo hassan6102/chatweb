@@ -12,31 +12,19 @@ password storage/hashing entirely; the app only ever calls
 
 ## Public User ID vs. phone number
 - `userId` (e.g. `GH-92841`) is the only identifier normal users search
-  and share with each other. It is generated server-side
-  (`functions/src/onUserCreate.ts`) and validated with
-  `utils/userId.ts#isValidUserId` before any lookup.
+  and share with each other. It is generated client-side using the Web
+  Crypto API and claimed atomically with a Firestore transaction. Rules
+  enforce the format, one-time reservation, and ownership.
 - `phoneNumber` is private. `findUserByUserId()` returns only
-  `PublicUserProfile` (`types/user.ts`), which strips `phoneNumber` and
-  `email` in application code, in addition to the Firestore Rules layer.
+  `PublicUserProfile` (`types/user.ts`) from `publicProfiles/{uid}`; email
+  and phone number are never present in that public document.
 
 ### Known limitation (flagged intentionally)
-Firestore Security Rules can only allow-or-deny an **entire document**
-read — they cannot redact individual fields like `phoneNumber` from a
-document another user is allowed to read for other reasons (e.g. displaying
-`displayName`/`photoURL` in search results). `firestore.rules` currently
-allows any signed-in user to `get`/`list` `users/{uid}` documents, which
-means a user who bypasses the app and queries Firestore directly could, in
-principle, read another user's `phoneNumber` field.
-
-**This must be hardened before shipping `phoneNumber` on real users**, by
-one of:
-1. Moving public user lookups to a callable Cloud Function that returns a
-   stripped `PublicUserProfile` server-side, and restricting the
-   `users/{uid}` Firestore Rule to `allow get: if isSelf(uid);` (no public
-   `list`/`get` at all), or
-2. Splitting the private fields into a separate
-   `users/{uid}/private/profile` document with rules `allow read: if
-   isSelf(uid)`.
+Firestore Rules deny listing `users/{uid}`, `publicProfiles/{uid}`, and
+`userIds/{userId}`. Signed-in users can only get public profile and code
+reservation documents by their exact document IDs; these documents contain
+no email or phone number. The private user document is readable only by its
+owner or an administrator.
 
 This is called out explicitly in `firestore.rules` and tracked in
 `docs/TASKS.md` so the next phase doesn't silently ship the gap.
@@ -61,9 +49,10 @@ This is called out explicitly in `firestore.rules` and tracked in
 `diff(resource.data).affectedKeys().hasOnly([...])` to a safe allow-list
 (`displayName`, `photoURL`, `status`, timestamps). `uid`, `userId`, `email`,
 `phoneNumber`, and `isDisabled` cannot be changed by the user themselves —
-`userId`/profile-creation is Cloud-Functions-only
-(`allow create: if false` on `users/{uid}`), and `isDelete`/`isDisabled` is
-reserved for the future admin system.
+`userId` is assigned by the client through an atomic reservation transaction,
+with Firestore Rules requiring the matching private profile, public
+projection, and unique reservation to be created together. `isDisabled` is
+reserved for the admin system.
 
 ## Storage
 - Avatars: signed-in read, owner-only write, capped at 5MB, must be an

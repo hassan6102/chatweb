@@ -170,6 +170,14 @@ export interface AdminLogDocument {
 
 export type AdminAccountStatus = "active" | "disabled" | "blocked";
 
+export function normalizeAdminAccountStatus(
+  status: unknown,
+  isDisabled: unknown
+): AdminAccountStatus {
+  if (status === "active" || status === "disabled" || status === "blocked") return status;
+  return isDisabled === true ? "disabled" : "active";
+}
+
 export interface AdminUserRow {
   uid: string;
   userId: string;
@@ -246,12 +254,12 @@ export interface AdminOverviewStats {
   onlineUsers: number;
   totalConversations: number;
   totalMessages: number;
-  messagesToday: number;
-  messagesThisWeek: number;
+  messagesToday: number | null;
+  messagesThisWeek: number | null;
   openReports: number;
   blockedUsers: number;
-  storageUsageBytes: number;
-  storageQuotaBytes: number;
+  storageUsageBytes: number | null;
+  storageQuotaBytes: number | null;
 }
 
 export interface TimeSeriesPoint {

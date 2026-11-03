@@ -19,8 +19,14 @@ export function isValidUserId(value: string): boolean {
 /** Generates a candidate userId. Caller MUST verify uniqueness server-side before persisting. */
 export function generateCandidateUserId(): string {
   const max = 10 ** USER_ID_DIGITS;
-  const n = Math.floor(Math.random() * max)
-    .toString()
-    .padStart(USER_ID_DIGITS, "0");
+  const range = 0x1_0000_0000;
+  const limit = Math.floor(range / max) * max;
+  const random = new Uint32Array(1);
+  let value: number;
+  do {
+    globalThis.crypto.getRandomValues(random);
+    value = random[0]!;
+  } while (value >= limit);
+  const n = (value % max).toString().padStart(USER_ID_DIGITS, "0");
   return `${USER_ID_PREFIX}${n}`;
 }

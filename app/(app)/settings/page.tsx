@@ -79,9 +79,10 @@ export default function SettingsPage() {
     setLoggingOut(true);
     try {
       await logout();
-      router.push("/login");
-    } catch {
-      setToast("Couldn't log out — try again");
+      router.replace("/login");
+    } catch (error) {
+      console.error("Could not sign out:", error);
+      setToast("Couldn't log out — check your connection and try again.");
       setLoggingOut(false);
     }
   }

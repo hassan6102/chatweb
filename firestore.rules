@@ -14,36 +14,218 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function isAdmin() {
+      let adminUserPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return isSignedIn() &&
+        exists(adminUserPath) &&
+        (
+          get(adminUserPath).data.role == 'admin' ||
+          get(adminUserPath).data.role == 'super_admin'
+        );
+    }
+
+    function isValidUserId(userId) {
+      return userId is string && userId.matches('^GH-[0-9]{5}$');
+    }
+
+    function hasUserIdReservation(uid, userId) {
+      return existsAfter(/databases/$(database)/documents/userIds/$(userId)) &&
+        getAfter(/databases/$(database)/documents/userIds/$(userId)).data.uid == uid;
+    }
+
+    function hasPublicProfile(uid, userId) {
+      return existsAfter(/databases/$(database)/documents/publicProfiles/$(uid)) &&
+        getAfter(/databases/$(database)/documents/publicProfiles/$(uid)).data.userId == userId;
+    }
+
     function isConversationMember(conversationId) {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/conversations/$(conversationId)/members/$(request.auth.uid));
     }
 
-    // Fields normal users are allowed to change on their OWN profile.
-    // phoneNumber, userId, uid, email, isDisabled are intentionally excluded —
-    // phoneNumber/userId/email/uid are managed by Cloud Functions / Auth,
-    // isDisabled is admin-only (see adminLogs-gated writes below).
+    function isValidDirectConversation() {
+      let data = request.resource.data;
+      let otherUid = data.memberUids[0] == request.auth.uid
+        ? data.memberUids[1]
+        : data.memberUids[0];
+      return data.keys().hasOnly([
+          'type', 'createdAt', 'updatedAt', 'lastMessageAt', 'lastMessageId', 'lastMessage',
+          'createdBy', 'directKey', 'memberUids', 'targetUserId'
+        ]) &&
+        data.keys().hasAll([
+          'type', 'createdAt', 'updatedAt', 'lastMessageAt', 'lastMessageId', 'lastMessage',
+          'createdBy', 'directKey', 'memberUids', 'targetUserId'
+        ]) &&
+        data.type == 'direct' &&
+        data.createdBy == request.auth.uid &&
+        data.memberUids is list &&
+        data.memberUids.size() == 2 &&
+        data.memberUids[0] != data.memberUids[1] &&
+        data.memberUids.hasAny([request.auth.uid]) &&
+        data.createdAt == request.time &&
+        data.updatedAt == request.time &&
+        data.lastMessage == null &&
+        data.lastMessageId == null &&
+        data.lastMessageAt == null &&
+        isValidUserId(data.targetUserId) &&
+        (
+          data.directKey == request.auth.uid + '_' + otherUid ||
+          data.directKey == otherUid + '_' + request.auth.uid
+        ) &&
+        existsAfter(/databases/$(database)/documents/userIds/$(data.targetUserId)) &&
+        getAfter(/databases/$(database)/documents/userIds/$(data.targetUserId)).data.uid == otherUid &&
+        existsAfter(/databases/$(database)/documents/publicProfiles/$(otherUid)) &&
+        getAfter(/databases/$(database)/documents/publicProfiles/$(otherUid)).data.userId == data.targetUserId;
+    }
+
+    function isDirectConversationInvite(conversationId, uid) {
+      let conversationPath = /databases/$(database)/documents/conversations/$(conversationId);
+      return isSignedIn() &&
+        existsAfter(conversationPath) &&
+        getAfter(conversationPath).data.createdBy == request.auth.uid &&
+        getAfter(conversationPath).data.type == 'direct' &&
+        getAfter(conversationPath).data.memberUids is list &&
+        getAfter(conversationPath).data.memberUids.size() == 2 &&
+        getAfter(conversationPath).data.memberUids.hasAll([request.auth.uid, uid]) &&
+        getAfter(/databases/$(database)/documents/publicProfiles/$(uid)).data.userId ==
+          getAfter(conversationPath).data.targetUserId;
+    }
+
+    function validConversationMember(uid) {
+      return request.resource.data.keys().hasOnly(['uid', 'joinedAt', 'role', 'isRemoved']) &&
+        request.resource.data.keys().hasAll(['uid', 'joinedAt', 'role', 'isRemoved']) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.joinedAt == request.time &&
+        request.resource.data.role == 'member' &&
+        request.resource.data.isRemoved == false;
+    }
+
+    function validNewInboxPreview(conversationId) {
+      return request.resource.data.keys().hasOnly([
+          'conversationId', 'otherUserId', 'lastMessage', 'lastMessageAt', 'lastMessageId',
+          'unreadCount', 'pinned', 'muted', 'archived', 'customName'
+        ]) &&
+        request.resource.data.keys().hasAll([
+          'conversationId', 'otherUserId', 'lastMessage', 'lastMessageAt', 'lastMessageId',
+          'unreadCount', 'pinned', 'muted', 'archived', 'customName'
+        ]) &&
+        request.resource.data.conversationId == conversationId &&
+        request.resource.data.lastMessage == null &&
+        request.resource.data.lastMessageId == null &&
+        request.resource.data.lastMessageAt == null &&
+        request.resource.data.unreadCount == 0 &&
+        request.resource.data.pinned == false &&
+        request.resource.data.muted == false &&
+        request.resource.data.archived == false &&
+        request.resource.data.customName == null;
+    }
+
+    function isLatestMessageUpdate(conversationId, data) {
+      let conversationPath = /databases/$(database)/documents/conversations/$(conversationId);
+      let messagePath = /databases/$(database)/documents/conversations/$(conversationId)/messages/$(data.lastMessageId);
+      let message = getAfter(messagePath).data;
+      let conversation = getAfter(conversationPath).data;
+      return isConversationMember(conversationId) &&
+        data.lastMessageId is string &&
+        existsAfter(messagePath) &&
+        message.senderId == request.auth.uid &&
+        message.conversationId == conversationId &&
+        message.createdAt == request.time &&
+        data.lastMessageAt == request.time &&
+        conversation.lastMessageId == data.lastMessageId &&
+        conversation.lastMessageAt == data.lastMessageAt &&
+        conversation.lastMessage == data.lastMessage &&
+        conversation.updatedAt == request.time &&
+        (
+          (message.type == 'text' && data.lastMessage == message.text) ||
+          (message.type != 'text' && data.lastMessage == '[' + message.type + ']')
+        );
+    }
+
+    // User IDs can only be added to legacy documents when the reservation
+    // and public projection are created in the same transaction.
     function onlySelfEditableUserFields() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(['displayName', 'photoURL', 'status', 'updatedAt', 'lastSeenAt', 'lastLoginAt']);
+        .hasOnly(['displayName', 'photoURL', 'status', 'updatedAt', 'lastSeenAt', 'lastLoginAt', 'userId']);
+    }
+
+    function validPublicProfile(uid) {
+      return request.resource.data.keys().hasOnly(['uid', 'userId', 'displayName']) &&
+        request.resource.data.keys().hasAll(['uid', 'userId', 'displayName']) &&
+        request.resource.data.uid == uid &&
+        isValidUserId(request.resource.data.userId) &&
+        (request.resource.data.displayName == null || request.resource.data.displayName is string);
     }
 
    // ---------------------------------------------------------------------
     // users/{uid}
     // ---------------------------------------------------------------------
     match /users/{uid} {
-      // إغلاق الثغرة الأمنية: لا يمكن قراءة المستند كاملاً إلا لصاحب الحساب أو للمشرف
-      allow read: if isSelf(uid) || (request.auth != null && request.auth.token.admin == true);
+      allow read: if isSelf(uid) || isAdmin() ||
+        (request.auth != null && request.auth.token.admin == true);
 
-      allow create: if false; // only Cloud Functions (Admin SDK) creates user docs
-      allow update: if isSelf(uid) && onlySelfEditableUserFields();
+      allow create: if isSelf(uid) &&
+        request.resource.data.keys().hasOnly([
+          'uid', 'userId', 'email', 'displayName', 'phoneNumber', 'photoURL',
+          'status', 'createdAt', 'updatedAt', 'lastLoginAt', 'lastSeenAt', 'isDisabled'
+        ]) &&
+        request.resource.data.keys().hasAll([
+          'uid', 'userId', 'email', 'displayName', 'phoneNumber', 'photoURL',
+          'status', 'createdAt', 'updatedAt', 'lastLoginAt', 'lastSeenAt', 'isDisabled'
+        ]) &&
+        request.resource.data.uid == uid &&
+        isValidUserId(request.resource.data.userId) &&
+        request.resource.data.email == request.auth.token.email &&
+        (request.resource.data.displayName == null || request.resource.data.displayName is string) &&
+        (request.resource.data.phoneNumber == null || request.resource.data.phoneNumber is string) &&
+        (request.resource.data.photoURL == null || request.resource.data.photoURL is string) &&
+        request.resource.data.status == 'offline' &&
+        request.resource.data.isDisabled == false &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.lastLoginAt == request.time &&
+        request.resource.data.lastSeenAt == request.time &&
+        hasUserIdReservation(uid, request.resource.data.userId) &&
+        hasPublicProfile(uid, request.resource.data.userId);
+
+      allow update: if isSelf(uid) && onlySelfEditableUserFields() && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['userId']) ||
+        (
+          (!('userId' in resource.data) || resource.data.userId == null) &&
+          isValidUserId(request.resource.data.userId) &&
+          hasUserIdReservation(uid, request.resource.data.userId) &&
+          hasPublicProfile(uid, request.resource.data.userId)
+        )
+      );
       allow delete: if false;
     }
 
-    // Reservation collection backing unique userId allocation.
+    // Code lookup is get-only so users cannot enumerate all contact codes.
     match /userIds/{userId} {
-      allow read: if isSignedIn();
-      allow write: if false; // Admin SDK / Cloud Functions only
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isSelf(request.resource.data.uid) &&
+        request.resource.data.keys().hasOnly(['uid', 'createdAt']) &&
+        request.resource.data.keys().hasAll(['uid', 'createdAt']) &&
+        request.resource.data.createdAt == request.time &&
+        isValidUserId(userId) &&
+        hasPublicProfile(request.auth.uid, userId) &&
+        getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.userId == userId;
+      allow update, delete: if false;
+    }
+
+    // Public, non-sensitive profile projection used only after exact code lookup.
+    match /publicProfiles/{uid} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isSelf(uid) &&
+        validPublicProfile(uid) &&
+        getAfter(/databases/$(database)/documents/users/$(uid)).data.userId == request.resource.data.userId;
+      allow update: if isSelf(uid) &&
+        validPublicProfile(uid) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'userId']) &&
+        getAfter(/databases/$(database)/documents/users/$(uid)).data.userId == request.resource.data.userId;
+      allow delete: if false;
     }
 
     // users/{uid}/contacts/{contactUid}
@@ -55,48 +237,72 @@ service cloud.firestore {
     // including the PRIVATE customName field.
     match /users/{uid}/conversations/{conversationId} {
       allow read: if isSelf(uid);
-      allow create: if isSelf(uid) && isConversationMember(conversationId);
+      allow create: if validNewInboxPreview(conversationId) &&
+        (
+          (isSelf(uid) &&
+            existsAfter(/databases/$(database)/documents/conversations/$(conversationId)/members/$(uid))) ||
+          (isDirectConversationInvite(conversationId, uid) &&
+            request.resource.data.otherUserId == request.auth.uid)
+        );
       // Only the fields a client legitimately updates from the UI.
-      allow update: if isSelf(uid) &&
+      allow update: if (
+        isSelf(uid) &&
         request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['unreadCount', 'pinned', 'muted', 'archived', 'customName', 'lastMessage', 'lastMessageAt']);
+          .hasOnly([
+            'unreadCount', 'pinned', 'muted', 'archived', 'customName',
+            'lastMessage', 'lastMessageAt', 'lastMessageId'
+          ])
+      ) || (
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['unreadCount', 'lastMessage', 'lastMessageAt', 'lastMessageId']) &&
+        request.resource.data.otherUserId == request.auth.uid &&
+        request.resource.data.unreadCount == resource.data.unreadCount + 1 &&
+        isLatestMessageUpdate(conversationId, request.resource.data)
+      );
       allow delete: if isSelf(uid);
+    }
+
+    // Collection-group reads are used by admin metrics and remain admin-only.
+    match /{path=**}/messages/{messageId} {
+      allow read: if isAdmin();
     }
 
     // ---------------------------------------------------------------------
     // conversations/{conversationId}
     // ---------------------------------------------------------------------
     match /conversations/{conversationId} {
-      allow read: if isConversationMember(conversationId);
+      allow read: if isConversationMember(conversationId) || isAdmin();
 
       // Direct conversations must have exactly 2 members and the creator
       // must be one of them. Member docs are created alongside this in the
       // same client-side transaction (Firestore Rules validate each write
       // independently within a transaction).
       allow create: if isSignedIn() &&
-        request.resource.data.createdBy == request.auth.uid &&
-        request.resource.data.type == 'direct';
+        conversationId == request.resource.data.directKey &&
+        isValidDirectConversation();
 
       // Only server-maintained fields may change, and only by members.
       allow update: if isConversationMember(conversationId) &&
         request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt']);
+          .hasOnly(['lastMessageId', 'lastMessage', 'lastMessageAt', 'updatedAt']) &&
+        isLatestMessageUpdate(conversationId, request.resource.data);
 
       allow delete: if false;
 
       // conversations/{conversationId}/members/{uid}
       match /members/{uid} {
-        allow read: if isConversationMember(conversationId);
+        allow read: if isConversationMember(conversationId) || isAdmin();
         // A user may only ever add THEMSELVES as a member — prevents
         // forcing your way into someone else's conversation.
-        allow create: if isSelf(uid);
+        allow create: if validConversationMember(uid) &&
+          (isSelf(uid) || isDirectConversationInvite(conversationId, uid));
         allow update: if false; // role changes reserved for future admin/group logic
         allow delete: if false;
       }
 
       // conversations/{conversationId}/messages/{messageId}
       match /messages/{messageId} {
-        allow read: if isConversationMember(conversationId);
+        allow read: if isConversationMember(conversationId) || isAdmin();
 
         allow create: if isConversationMember(conversationId) &&
           request.resource.data.senderId == request.auth.uid &&
@@ -129,12 +335,14 @@ service cloud.firestore {
     // ---------------------------------------------------------------------
     match /reports/{reportId} {
       allow create: if isSignedIn() && request.resource.data.reportedBy == request.auth.uid;
-      allow read, update, delete: if false;
+      allow read: if isAdmin();
+      allow update, delete: if false;
     }
 
     // adminLogs/{logId} — written only by trusted server-side admin code.
     match /adminLogs/{logId} {
-      allow read, write: if false;
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // Default deny for anything not explicitly matched above.

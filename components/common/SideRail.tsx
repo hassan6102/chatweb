@@ -4,8 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "./Icon";
 import { Avatar } from "./Avatar";
-import { CURRENT_USER } from "@/lib/mock/mockUsers";
-import { MOCK_NOTIFICATIONS } from "@/lib/mock/mockNotifications";
+import { useAuth } from "@/hooks/useAuth";
 
 const ITEMS: { href: string; label: string; icon: Parameters<typeof Icon>[0]["name"] }[] = [
   { href: "/", label: "Chats", icon: "home" },
@@ -15,7 +14,7 @@ const ITEMS: { href: string; label: string; icon: Parameters<typeof Icon>[0]["na
 
 export function SideRail() {
   const pathname = usePathname();
-  const unread = MOCK_NOTIFICATIONS.filter((n) => !n.read).length;
+  const { user } = useAuth();
 
   return (
     <nav
@@ -43,9 +42,6 @@ export function SideRail() {
             }`}
           >
             <Icon name={item.icon} size={20} />
-            {item.href === "/notifications" && unread > 0 && (
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger" />
-            )}
           </Link>
         );
       })}
@@ -53,7 +49,7 @@ export function SideRail() {
       <div className="flex-1" />
 
       <Link href="/profile" aria-label="Your profile" className="focus-ring rounded-full">
-        <Avatar name={CURRENT_USER.displayName} userId={CURRENT_USER.userId} />
+        <Avatar name={user?.displayName || "Account"} userId={user?.uid || "account"} />
       </Link>
     </nav>
   );

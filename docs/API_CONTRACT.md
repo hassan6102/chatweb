@@ -8,7 +8,7 @@ add Route Handlers under `app/api/**`; when they do, document them here.
 ## Auth (`lib/auth/authService.ts`)
 | function | signature | notes |
 |---|---|---|
-| `registerWithEmail` | `(email: string, password: string) => Promise<User>` | Creates Firebase Auth user only; profile doc created by `onUserCreate` trigger |
+| `registerWithEmail` | `(email: string, password: string) => Promise<User>` | Creates the Auth user, then atomically provisions the profile and contact code |
 | `loginWithEmail` | `(email: string, password: string) => Promise<User>` | |
 | `logout` | `() => Promise<void>` | |
 | `requestPasswordReset` | `(email: string) => Promise<void>` | Sends Firebase's reset email |
@@ -18,7 +18,8 @@ add Route Handlers under `app/api/**`; when they do, document them here.
 ## Users (`lib/users/*`)
 | function | signature | notes |
 |---|---|---|
-| `findUserByUserId` | `(userId: string) => Promise<PublicUserProfile \| null>` | Client-safe; strips private fields in code (defense in depth alongside Rules) |
+| `ensureUserProfile` | `(user: User) => Promise<string>` | Authenticated client atomically creates/completes the private profile, public projection, and unique contact-code reservation |
+| `findUserByUserId` | `(userId: string) => Promise<PublicUserProfile \| null>` | Resolves an exact code reservation and reads only the public-safe profile projection |
 | `createUserProfile` | `(params) => Promise<UserDocument>` | **Server-only.** Alternative to the `onUserCreate` trigger — use one or the other |
 
 ## Conversations (`lib/conversations/*`)
@@ -52,4 +53,4 @@ future phases (UI, Admin) should import rather than re-declaring shapes.
 ## Cloud Functions (`functions/src/*`)
 | function | trigger | notes |
 |---|---|---|
-| `onUserCreate` | Auth `onCreate` | Allocates unique `userId`, writes `users/{uid}` |
+| `onUserCreate` | Auth `onCreate` | Optional server-side profile provisioning; shares the same idempotent reservation contract as the client |

@@ -1,10 +1,13 @@
 import type { Metadata, Viewport } from "next";
-// @ts-ignore
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Messaging App",
-  description: "A fast, modern 1-to-1 messaging app — find people by User ID and chat privately.",
+  applicationName: "Chat",
+  title: {
+    default: "Chat",
+    template: "%s | Chat",
+  },
+  description: "A private, modern messaging app for one-to-one conversations.",
 };
 
 export const viewport: Viewport = {
@@ -15,9 +18,11 @@ export const viewport: Viewport = {
 
 const THEME_INIT_SCRIPT = `
 try {
-  var stored = JSON.parse(localStorage.getItem("theme-preference") || '"system"');
+  var stored = JSON.parse(localStorage.getItem("theme-preference") || '"dark"');
   if (stored === "light" || stored === "dark") {
     document.documentElement.setAttribute("data-theme", stored);
+  } else {
+    document.documentElement.removeAttribute("data-theme");
   }
 } catch (e) {}
 `;

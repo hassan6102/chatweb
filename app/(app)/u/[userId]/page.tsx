@@ -6,79 +6,75 @@ import { UserProfilePanel } from "@/components/users/UserProfilePanel";
 import { RenameContact } from "@/components/users/RenameContact";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Toast } from "@/components/common/Toast";
-import { db, auth } from "@/firebase/client";
-import { doc, collection, query, where, getDocs, updateDoc, arrayUnion } from "firebase/firestore";
+import { db } from "@/firebase/client";
+import { collection, doc, getDocs, updateDoc } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
+import { findUserByUserId } from "@/lib/users/findUserByUserId";
+import { createOrGetDirectConversation } from "@/lib/conversations/createOrGetDirectConversation";
+import type { PublicUserProfile } from "@/types/user";
 
 export default function OtherUserProfilePage() {
   const params = useParams<{ userId: string }>();
   const router = useRouter();
   const { user: currentUser } = useAuth();
   
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<PublicUserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  // حالات خاصة بتغيير الاسم والمحادثة
   const [renaming, setRenaming] = useState(false);
   const [convId, setConvId] = useState<string | null>(null);
   const [customName, setCustomName] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     async function fetchUserAndConv() {
       const decodedUserId = decodeURIComponent(params.userId);
+      setLoading(true);
+      setLoadError(false);
       try {
-        const q = query(collection(db, "users"), where("userId", "==", decodedUserId));
-        const snap = await getDocs(q);
-        
-        if (!snap.empty) {
-          const firstDoc = snap.docs[0];
-          if (firstDoc) {
-            const userData = { uid: firstDoc.id, ...firstDoc.data() };
-            setUser(userData);
+        const profile = await findUserByUserId(decodedUserId);
+        if (!active) return;
+        setUser(profile);
+        setConvId(null);
+        setCustomName(null);
 
-            // البحث عن المحادثة بينكما لجلب الاسم المخصص إن وجد
-            if (currentUser?.uid) {
-              const convQ = query(collection(db, "conversations"), where("participants", "array-contains", currentUser.uid));
-              const convSnap = await getDocs(convQ);
-              const conv = convSnap.docs.find(d => d.data().participants.includes(userData.uid));
-              
-              if (conv) {
-                setConvId(conv.id);
-                setCustomName(conv.data().customNames?.[currentUser.uid] || null);
-              }
-            }
+        if (profile && currentUser?.uid) {
+          const inbox = await getDocs(collection(db, "users", currentUser.uid, "conversations"));
+          if (!active) return;
+          const conversation = inbox.docs.find((entry) => entry.data().otherUserId === profile.uid);
+          if (conversation) {
+            setConvId(conversation.id);
+            setCustomName((conversation.data().customName as string | null | undefined) ?? null);
           }
         }
       } catch (error) {
-        console.error("Error fetching data", error);
+        if (!active) return;
+        console.error("Error fetching public profile:", error);
+        setLoadError(true);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }
-    fetchUserAndConv();
+    void fetchUserAndConv();
+    return () => {
+      active = false;
+    };
   }, [params.userId, currentUser?.uid]);
 
   if (loading) return <div className="p-4 text-center text-sm text-ink-muted">جاري التحميل...</div>;
+
+  if (loadError) {
+    return <EmptyState icon="info" title="Profile unavailable" description="This profile could not be loaded." />;
+  }
 
   if (!user) {
     return <EmptyState icon="search" title="User not found" description="This User ID doesn't match anyone." />;
   }
 
   async function handleBlock() {
-    if (!currentUser?.uid) return;
-    try {
-      const myRef = doc(db, "users", currentUser.uid);
-      const blockedData = {
-        uid: user.uid ?? "",
-        userId: user.userId ?? "",
-        displayName: user.displayName ?? "مستخدم"
-      };
-      await updateDoc(myRef, { blockedUsers: arrayUnion(blockedData) });
-      setToast(`تم حظر ${blockedData.displayName} بنجاح`);
-    } catch (error) {
-      console.error("Error blocking user", error);
-    }
+    setToast("Blocking is not available yet.");
   }
 
   async function handleRenameSave(newName: string | null) {
@@ -88,8 +84,8 @@ export default function OtherUserProfilePage() {
       return;
     }
     try {
-      await updateDoc(doc(db, "conversations", convId), {
-        [`customNames.${currentUser.uid}`]: newName
+      await updateDoc(doc(db, "users", currentUser.uid, "conversations", convId), {
+        customName: newName,
       });
       setCustomName(newName);
       setRenaming(false);
@@ -107,7 +103,20 @@ export default function OtherUserProfilePage() {
         isSelf={false}
         customName={customName}
         onBack={() => router.back()}
-        onMessage={() => convId ? router.push(`/chat/${convId}`) : router.back()}
+        onMessage={async () => {
+          if (!currentUser?.uid) {
+            setToast("Please sign in again to start a conversation.");
+            return;
+          }
+          try {
+            const conversationId =
+              convId ?? (await createOrGetDirectConversation(currentUser.uid, user.uid, user.userId));
+            router.push(`/chat/${conversationId}`);
+          } catch (error) {
+            console.error("Could not start conversation:", error);
+            setToast("Could not start this conversation.");
+          }
+        }}
         onRename={() => setRenaming(true)}
         onBlock={handleBlock}
       />

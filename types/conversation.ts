@@ -12,10 +12,13 @@ export interface ConversationDocument {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   lastMessageAt: Timestamp | null;
+  lastMessageId: string | null;
   lastMessage: string | null;
   createdBy: string;
   /** Deterministic key for direct chats: sorted `${uidA}_${uidB}`. Used to prevent duplicate direct conversations. Null for group chats. */
   directKey: string | null;
+  memberUids: [string, string];
+  targetUserId: string;
 }
 
 /** conversations/{conversationId}/members/{uid} */
@@ -38,6 +41,7 @@ export interface UserConversationPreview {
   otherUserId: string | null;
   lastMessage: string | null;
   lastMessageAt: Timestamp | null;
+  lastMessageId?: string | null;
   unreadCount: number;
   pinned: boolean;
   muted: boolean;

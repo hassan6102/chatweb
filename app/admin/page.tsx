@@ -19,10 +19,24 @@ import {
   ClockIcon,
   BuildingIcon,
 } from "@/components/admin/icons";
-
-// استيراد أدوات فايربيز الحقيقية (ضفنا collectionGroup)
 import { db } from "@/firebase/client";
-import { collection, collectionGroup, getCountFromServer, query, where } from "firebase/firestore";
+import {
+  collection,
+  collectionGroup,
+  getCountFromServer,
+  getDocs,
+  limit,
+  query,
+  Timestamp,
+  where,
+  orderBy,
+} from "firebase/firestore";
+
+function dayStart(date: Date): Date {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
 
 export default function AdminOverviewPage() {
   const [stats, setStats] = useState<AdminOverviewStats | null>(null);
@@ -30,63 +44,103 @@ export default function AdminOverviewPage() {
   const [logs, setLogs] = useState<AdminLogDocument[]>([]);
   const [reports, setReports] = useState<ReportDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [seriesError, setSeriesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function load() {
     setLoading(true);
     setError(null);
+    setSeriesError(null);
     try {
-      // 1. جلب عدد المستخدمين الحقيقي
       const usersRef = collection(db, "users");
-      const totalUsersSnap = await getCountFromServer(usersRef);
-      const totalUsers = totalUsersSnap.data().count;
-
-      // 2. جلب عدد المتصلين الآن
-      let onlineUsers = 0;
-      try {
-        const onlineQ = query(usersRef, where("status", "in", ["online", "active"]));
-        const onlineSnap = await getCountFromServer(onlineQ);
-        onlineUsers = onlineSnap.data().count;
-      } catch (e) {
-        // نتجاهل الخطأ في حال عدم وجود Index
-      }
-
-      // 3. جلب إجمالي المحادثات الحقيقية
-      const convRef = collection(db, "conversations");
-      const totalConvSnap = await getCountFromServer(convRef);
-      const totalConversations = totalConvSnap.data().count;
-
-      // 4. جلب إجمالي عدد الرسائل الفعلية (التي سألت عنها)
-      let totalMessages = 0;
-      try {
-        const msgRef = collectionGroup(db, "messages");
-        const totalMsgSnap = await getCountFromServer(msgRef);
-        totalMessages = totalMsgSnap.data().count;
-      } catch (e) {
-        console.error("Error fetching messages count:", e);
-      }
-
-      setStats({
-        totalUsers: totalUsers,
-        activeUsers: totalUsers,
-        onlineUsers: onlineUsers,
-        totalConversations: totalConversations,
-        totalMessages: totalMessages, // الآن سيقرأ الـ 8 رسائل وكل الرسائل القادمة
-        messagesToday: 0, 
-        messagesThisWeek: 0,
-        openReports: 0,
-        blockedUsers: 0,
-        // المساحة تُترك كقيمة جمالية لأن قراءتها تتطلب Firebase Console
-        storageUsageBytes: 0,
-        storageQuotaBytes: 10 * 1024 * 1024 * 1024, 
+      const conversationsRef = collection(db, "conversations");
+      const messagesRef = collectionGroup(db, "messages");
+      const reportsRef = collection(db, "reports");
+      const logsRef = collection(db, "adminLogs");
+      const today = dayStart(new Date());
+      const days = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(today);
+        date.setDate(today.getDate() - (6 - index));
+        return date;
       });
 
-      setSeries({ messageVolume: [], activeUsers: [] });
-      setLogs([]);
-      setReports([]);
+      const [
+        totalUsersSnapshot,
+        onlineUsersSnapshot,
+        totalConversationsSnapshot,
+        totalMessagesSnapshot,
+        disabledUsersSnapshot,
+        openReportsSnapshot,
+        reportsSnapshot,
+        logsSnapshot,
+        dailyCounts,
+      ] = await Promise.all([
+        getCountFromServer(usersRef),
+        getCountFromServer(query(usersRef, where("status", "in", ["online", "active"]))),
+        getCountFromServer(conversationsRef),
+        getCountFromServer(messagesRef),
+        getCountFromServer(query(usersRef, where("isDisabled", "==", true))),
+        getCountFromServer(query(reportsRef, where("status", "==", "open"))),
+        getDocs(query(reportsRef, where("status", "==", "open"), orderBy("createdAt", "desc"), limit(5))),
+        getDocs(query(logsRef, orderBy("createdAt", "desc"), limit(5))),
+        Promise.all(days.map(async (date) => {
+          const nextDate = new Date(date);
+          nextDate.setDate(date.getDate() + 1);
+          const start = Timestamp.fromDate(date);
+          const end = Timestamp.fromDate(nextDate);
+          const [messages, activeUsers] = await Promise.all([
+            getCountFromServer(query(messagesRef, where("createdAt", ">=", start), where("createdAt", "<", end))),
+            getCountFromServer(query(usersRef, where("lastSeenAt", ">=", start), where("lastSeenAt", "<", end))),
+          ]);
+          return {
+            label: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            messageVolume: messages.data().count,
+            activeUsers: activeUsers.data().count,
+          };
+        })).catch((dailyError: unknown) => {
+          console.error("Could not load dashboard daily metrics:", dailyError);
+          setSeriesError("Daily charts are temporarily unavailable while the Firestore index is building.");
+          return null;
+        }),
+      ]);
 
+      const totalUsers = totalUsersSnapshot.data().count;
+      const totalMessages = totalMessagesSnapshot.data().count;
+      const messageVolume = dailyCounts?.map(({ label, messageVolume }) => ({ label, value: messageVolume })) ?? [];
+      const activeUsers = dailyCounts?.map(({ label, activeUsers }) => ({ label, value: activeUsers })) ?? [];
+
+      setStats({
+        totalUsers,
+        activeUsers: Math.max(0, totalUsers - disabledUsersSnapshot.data().count),
+        onlineUsers: onlineUsersSnapshot.data().count,
+        totalConversations: totalConversationsSnapshot.data().count,
+        totalMessages,
+        messagesToday: dailyCounts ? messageVolume[messageVolume.length - 1]?.value ?? 0 : null,
+        messagesThisWeek: dailyCounts ? messageVolume.reduce((total, point) => total + point.value, 0) : null,
+        openReports: openReportsSnapshot.data().count,
+        blockedUsers: disabledUsersSnapshot.data().count,
+        storageUsageBytes: null,
+        storageQuotaBytes: null,
+      });
+
+      setSeries({ messageVolume, activeUsers });
+      setLogs(logsSnapshot.docs.map((snapshot) => ({
+        ...snapshot.data(),
+        logId: snapshot.id,
+      })) as AdminLogDocument[]);
+      setReports(reportsSnapshot.docs.map((snapshot) => ({
+        ...snapshot.data(),
+        reportId: snapshot.id,
+      })) as ReportDocument[]);
     } catch (err) {
       console.error("Dashboard error:", err);
+      if (err instanceof Error) {
+        console.error("Dashboard error details:", {
+          name: err.name,
+          message: err.message,
+          code: "code" in err ? err.code : undefined,
+        });
+      }
       setError("حدث خطأ أثناء جلب البيانات الحقيقية من فايربيز.");
     } finally {
       setLoading(false);
@@ -113,8 +167,8 @@ export default function AdminOverviewPage() {
             <StatCard label="Online now" value={formatNumber(stats.onlineUsers)} icon={<UsersIcon />} />
             <StatCard label="Conversations" value={formatNumber(stats.totalConversations)} icon={<ChatIcon />} />
             <StatCard label="Total messages" value={formatCompactNumber(stats.totalMessages)} icon={<MessageStatIcon />} />
-            <StatCard label="Messages today" value={formatNumber(stats.messagesToday)} icon={<ClockIcon />} />
-            <StatCard label="Messages this week" value={formatNumber(stats.messagesThisWeek)} icon={<ClockIcon />} />
+            <StatCard label="Messages today" value={stats.messagesToday === null ? "—" : formatNumber(stats.messagesToday)} icon={<ClockIcon />} />
+            <StatCard label="Messages this week" value={stats.messagesThisWeek === null ? "—" : formatNumber(stats.messagesThisWeek)} icon={<ClockIcon />} />
             <StatCard
               label="Open reports"
               value={formatNumber(stats.openReports)}
@@ -122,12 +176,7 @@ export default function AdminOverviewPage() {
               hint={stats.openReports > 0 ? "Needs review" : undefined}
             />
             <StatCard label="Blocked users" value={formatNumber(stats.blockedUsers)} icon={<ShieldIcon />} />
-            <StatCard
-              label="Storage used"
-              value={formatBytes(stats.storageUsageBytes)}
-              icon={<BuildingIcon />}
-              hint={`of ${formatBytes(stats.storageQuotaBytes)}`}
-            />
+            <StatCard label="Storage used" value={stats.storageUsageBytes === null ? "—" : formatBytes(stats.storageUsageBytes)} icon={<BuildingIcon />} hint="Storage metrics are not available in the client dashboard." />
           </>
         )}
       </div>
@@ -136,12 +185,12 @@ export default function AdminOverviewPage() {
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard title="Message volume, last 7 days">
           <div className="p-4">
-            {loading || !series ? <LoadingCard lines={4} /> : <LineChart data={series.messageVolume} color="#3854E0" />}
+            {loading || !series ? <LoadingCard lines={4} /> : seriesError ? <p className="text-sm text-admin-textMuted">{seriesError}</p> : <LineChart data={series.messageVolume} color="#3854E0" />}
           </div>
         </SectionCard>
         <SectionCard title="Active users, last 7 days">
           <div className="p-4">
-            {loading || !series ? <LoadingCard lines={4} /> : <LineChart data={series.activeUsers} color="#1E8F5F" />}
+            {loading || !series ? <LoadingCard lines={4} /> : seriesError ? <p className="text-sm text-admin-textMuted">{seriesError}</p> : <LineChart data={series.activeUsers} color="#1E8F5F" />}
           </div>
         </SectionCard>
       </div>

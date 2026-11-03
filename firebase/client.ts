@@ -22,10 +22,35 @@ const firebaseConfig = {
   databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
 };
 
+const isFirebaseConfigured = Boolean(
+  firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.appId
+);
+
+if (!isFirebaseConfigured && typeof window !== "undefined") {
+  throw new Error(
+    "Firebase client configuration is missing. Set the NEXT_PUBLIC_FIREBASE_* values from .env.example."
+  );
+}
+
+// Client components are prerendered on the server; this placeholder is server-only.
+const appConfig = isFirebaseConfigured
+  ? firebaseConfig
+  : {
+      apiKey: "build-only-placeholder",
+      authDomain: "build-only-placeholder.invalid",
+      projectId: "build-only-placeholder",
+      appId: "build-only-placeholder",
+      databaseURL: "https://build-only-placeholder.firebaseio.com",
+      storageBucket: "build-only-placeholder.appspot.com",
+    };
+
 // Avoid re-initializing during Next.js Fast Refresh / multiple imports.
 export const firebaseApp: FirebaseApp = getApps().length
   ? getApp()
-  : initializeApp(firebaseConfig);
+  : initializeApp(appConfig);
 
 export const auth: Auth = getAuth(firebaseApp);
 export const db: Firestore = getFirestore(firebaseApp);

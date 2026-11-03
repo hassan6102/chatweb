@@ -41,7 +41,7 @@ export async function getMessagesPage(
   const hasMore = snap.docs.length > pageSize;
 
   return {
-    messages: docs.map((d) => d.data() as MessageDocument),
+    messages: docs.map((d) => ({ ...d.data(), messageId: d.id }) as MessageDocument),
     cursor: docs.length ? (docs[docs.length - 1] ?? null) : null, hasMore,
   };
 }

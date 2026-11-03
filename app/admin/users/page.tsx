@@ -11,8 +11,8 @@ import { AccountStatusBadge } from "@/components/admin/ui/Badge";
 import { UserActionsMenu } from "@/components/admin/UserActionsMenu";
 import { PermissionGate } from "@/components/admin/ui/PermissionGate";
 import { useAdminAuth } from "@/lib/admin/adminAuth";
-import { hasPermission, type AdminAccountStatus, type AdminUserRow } from "@/types/admin";
-import { formatDate, formatRelativeTime, initialsFromName, maskEmail, maskPhoneNumber } from "@/lib/admin/format";
+import { hasPermission, normalizeAdminAccountStatus, type AdminAccountStatus, type AdminUserRow } from "@/types/admin";
+import { formatDate, formatDateTime, formatRelativeTime, initialsFromName, maskEmail, maskPhoneNumber } from "@/lib/admin/format";
 import { UsersIcon } from "@/components/admin/icons";
 
 import { db } from "@/firebase/client";
@@ -62,13 +62,14 @@ export default function AdminUsersPage() {
           displayName: data.displayName || "No name",
           email: data.email || "",
           phoneNumber: data.phoneNumber || "",
-          accountStatus: (data.accountStatus || data.status || "active") as AdminAccountStatus,
+          accountStatus: normalizeAdminAccountStatus(data.accountStatus, data.isDisabled),
           role: data.role || "user",
           conversationCount: 0,
           messageCount: 0,     
           createdAt: getTimestampMs(data.createdAt || data.timestamp),
+          lastLoginAt: data.lastLoginAt ? new Date(getTimestampMs(data.lastLoginAt)) : null,
           lastSeenAt: getTimestampMs(data.lastSeenAt || data.updatedAt),
-          isOnline: data.status === "online" || data.status === "active",
+          isOnline: data.status === "online",
         } as any;
       });
 
@@ -96,7 +97,7 @@ export default function AdminUsersPage() {
         let cCount = 0;
         let mCount = 0;
         try {
-          const convQ = query(collection(db, "conversations"), where("participants", "array-contains", u.uid));
+          const convQ = query(collection(db, "conversations"), where("memberUids", "array-contains", u.uid));
           const cSnap = await getCountFromServer(convQ);
           cCount = cSnap.data().count;
 
@@ -179,6 +180,15 @@ export default function AdminUsersPage() {
       key: "created",
       header: "Joined",
       render: (u) => <span className="text-admin-textMuted">{(u.createdAt as any) > 0 ? formatDate(u.createdAt as any) : "—"}</span>,
+    },
+    {
+      key: "lastLogin",
+      header: "Last login",
+      render: (u) => (
+        <span className="text-admin-textMuted">
+          {u.lastLoginAt ? formatDateTime(u.lastLoginAt) : "—"}
+        </span>
+      ),
     },
     {
       key: "lastSeen",

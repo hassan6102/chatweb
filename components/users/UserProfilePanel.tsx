@@ -3,7 +3,21 @@
 import { Button } from "@/components/common/Button";
 import { IconButton } from "@/components/common/IconButton";
 import { Icon } from "@/components/common/Icon";
+import { Avatar } from "@/components/common/Avatar";
 import { formatLastSeen } from "@/lib/mock/timestamp";
+import type { UserStatus } from "@/types/user";
+
+interface ProfilePanelUser {
+  uid: string;
+  userId: string;
+  displayName?: string | null;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  photoURL?: string | null;
+  status?: UserStatus | "online";
+  lastSeenAt?: number | import("firebase/firestore").Timestamp | null;
+}
 
 export function UserProfilePanel({
   user,
@@ -15,7 +29,7 @@ export function UserProfilePanel({
   onBlock,
   onEditProfile,
 }: {
-  user: any;
+  user: ProfilePanelUser;
   isSelf: boolean;
   customName?: string | null;
   onBack: () => void;
@@ -26,6 +40,13 @@ export function UserProfilePanel({
 }) {
   // تم إزالة الإيميل تماماً من هنا واستخدام "مستخدم" كبديل نهائي
   const displayName = customName || user.displayName || user.name || user.userId || "مستخدم";
+  const statusText = user.status
+    ? user.status === "active" || user.status === "online"
+      ? "Online"
+      : formatLastSeen(user.lastSeenAt)
+    : user.lastSeenAt
+      ? formatLastSeen(user.lastSeenAt)
+      : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -37,6 +58,14 @@ export function UserProfilePanel({
       </header>
 
       <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-6 py-8 text-center">
+        <Avatar
+          name={user.displayName || user.name || null}
+          userId={user.userId}
+          photoURL={user.photoURL}
+          size="xl"
+          status={user.status === "online" ? "active" : user.status}
+          showStatus={user.status === "active" || user.status === "online"}
+        />
         <h2 dir="auto" className="mt-4 text-lg font-semibold text-ink">
           {displayName}
         </h2>
@@ -50,9 +79,7 @@ export function UserProfilePanel({
           {user.userId}
         </div>
 
-        <p className="mt-1 text-xs text-ink-faint">
-          {user.status === "active" || user.status === "online" ? "Online" : formatLastSeen(user.lastSeenAt)}
-        </p>
+        {statusText && <p className="mt-1 text-xs text-ink-faint">{statusText}</p>}
 
         {!isSelf && (
           <div className="mt-6 flex w-full max-w-xs flex-col gap-2">
@@ -73,10 +100,17 @@ export function UserProfilePanel({
 
         {isSelf && (
           <div className="mt-8 w-full max-w-xs space-y-1 text-left">
-            {/* تم إخفاء الإيميل من هنا نهائياً */}
+            {user.email && <InfoRow label="Email" value={user.email} />}
             <InfoRow label="Phone" value={user.phone || "No phone number"} />
-            <InfoRow label="Status" value="Active" />
+            <InfoRow label="Status" value={user.status === "offline" ? "Offline" : "Active"} />
           </div>
+        )}
+
+        {isSelf && onEditProfile && (
+          <Button variant="secondary" onClick={onEditProfile} className="mt-6">
+            <Icon name="edit" size={16} />
+            Edit profile
+          </Button>
         )}
       </div>
     </div>
